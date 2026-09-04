@@ -27,7 +27,10 @@ import {
   connectSpecOf,
   fontFamilyOf,
   freeRadii,
+  frameRadius,
+  frameSizeOf,
   groupsInFrame,
+  isPhoneFrame,
   normalizeTheme,
   toggleIcon,
   uniformRadii,
@@ -38,6 +41,8 @@ import { t, useLang } from "@/lib/i18n";
 
 const EASE = [0.2, 0, 0, 1] as const;
 const SLIDE_MS = 0.42;
+/** room reserved for the wide preview controls: panel, right margin and breathing space */
+const WIDE_CONTROL_SPACE = 220;
 
 type Anim = { t: Transition; back: boolean; /** the expressive motion scheme: springs instead of eased tweens */ spring?: boolean };
 
@@ -388,28 +393,89 @@ export function Preview({
 
   const top = stack[stack.length - 1];
   const current = frames.find((f) => f.id === top?.id) ?? frames[0];
+  const peekFrame = peek ? frames.find((f) => f.id === peek.frameId) : undefined;
+  const { w: frameW, h: frameH } = current ? frameSizeOf(current) : { w: PHONE_W, h: PHONE_H };
+  const phone = current ? isPhoneFrame(current) : true;
+  /* every screen sits in the same bezel; only the corners tell a phone from a window */
+  const radius = current ? frameRadius(current) : PHONE_R;
+  const outerW = frameW + BEZEL * 2;
+  const outerH = frameH + BEZEL * 2;
+  const targetFrame = peekFrame ?? current;
+  const { w: targetFrameW, h: targetFrameH } = targetFrame ? frameSizeOf(targetFrame) : { w: frameW, h: frameH };
+  const targetRadius = targetFrame ? frameRadius(targetFrame) : radius;
+  const targetOuterW = targetFrameW + BEZEL * 2;
+  const targetOuterH = targetFrameH + BEZEL * 2;
+
+  /* The shell is the size of the screen on show. When the screen changes it eases to
+   * the new size in step with the slide; a tracked swipe steers it toward the target
+   * with the finger, so a phone and a desktop screen hand over without a snap. */
+  const prog = useMotionValue(0);
+  const shellW = useMotionValue(outerW);
+  const shellH = useMotionValue(outerH);
+  const screenRadius = useMotionValue(radius);
+  useEffect(() => {
+    const opts = { duration: SLIDE_MS, ease: EASE };
+    const runs = [animate(shellW, outerW, opts), animate(shellH, outerH, opts), animate(screenRadius, radius, opts)];
+    return () => runs.forEach((r) => r.stop());
+  }, [outerW, outerH, radius, shellW, shellH, screenRadius]);
+  useEffect(
+    () =>
+      prog.on("change", (v) => {
+        if (!peekRef.current) return;
+        shellW.set(outerW + (targetOuterW - outerW) * v);
+        shellH.set(outerH + (targetOuterH - outerH) * v);
+        screenRadius.set(radius + (targetRadius - radius) * v);
+      }),
+    [prog, outerW, outerH, radius, targetOuterW, targetOuterH, targetRadius, shellW, shellH, screenRadius],
+  );
+  const screenW = useTransform(shellW, (v) => v - BEZEL * 2);
+  const screenH = useTransform(shellH, (v) => v - BEZEL * 2);
+  const shellRadius = useTransform(screenRadius, (v) => v + BEZEL);
+  /* the stage is sized for the largest screen in the document, so the scale never
+   * changes while a swipe crosses sizes or a screen is opened from the picker */
+  const maxOuterW = Math.max(outerW, ...frames.map((f) => frameSizeOf(f).w + BEZEL * 2));
+  const maxOuterH = Math.max(outerH, ...frames.map((f) => frameSizeOf(f).h + BEZEL * 2));
+  const shellLeft = useTransform(shellW, (v) => ((maxOuterW - v) * scale) / 2);
+  const shellTop = useTransform(shellH, (v) => ((maxOuterH - v) * scale) / 2);
 
   /* on a wide window the controls stand in a column at the right edge, clear of the phone;
    * on a phone they stay along the bottom, where the frame fills the width anyway */
   const [wide, setWide] = useState(false);
   useEffect(() => {
     const fit = () => {
-      setWide(window.innerWidth >= 720);
+      const isWide = window.innerWidth >= 720;
+      setWide(isWide);
       setScale(
-        Math.min(1.4, (window.innerHeight - 32) / (PHONE_H + BEZEL * 2), (window.innerWidth - (window.innerWidth < 720 ? 16 : 240)) / (PHONE_W + BEZEL * 2)),
+        Math.min(1.4, (window.innerHeight - 32) / maxOuterH, (window.innerWidth - (isWide ? WIDE_CONTROL_SPACE + 16 : 16)) / maxOuterW),
       );
     };
     fit();
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
-  }, []);
+  }, [maxOuterH, maxOuterW]);
+
+  /* a slide between a phone and a desktop screen would drag one shape through the
+   * other; screens of different sizes cross-fade while the shell changes size */
+  const sameSize = useCallback(
+    (fromId: string, toId: string) => {
+      const a = frames.find((f) => f.id === fromId);
+      const b = frames.find((f) => f.id === toId);
+      if (!a || !b) return true;
+      const sa = frameSizeOf(a);
+      const sb = frameSizeOf(b);
+      return sa.w === sb.w && sa.h === sb.h;
+    },
+    [frames],
+  );
 
   const back = useCallback(() => {
     const s = stackRef.current;
     if (s.length < 2 || peekRef.current) return;
-    setAnim({ t: s[s.length - 1].t, back: true, spring });
+    const from = s[s.length - 1];
+    const to = s[s.length - 2];
+    setAnim({ t: sameSize(from.id, to.id) ? from.t : "fade", back: true, spring });
     setStack(s.slice(0, -1));
-  }, [spring]);
+  }, [spring, sameSize]);
 
   const go = useCallback(
     (a: Action) => {
@@ -419,10 +485,12 @@ export function Preview({
         return;
       }
       if (!frames.some((f) => f.id === a.to)) return;
-      setAnim({ t: a.transition, back: false, spring });
-      setStack((s) => [...s, { id: a.to, t: a.transition }]);
+      const s = stackRef.current;
+      const t = sameSize(s[s.length - 1].id, a.to) ? a.transition : "fade";
+      setAnim({ t, back: false, spring });
+      setStack((cur) => [...cur, { id: a.to, t }]);
     },
-    [frames, back, spring],
+    [frames, back, spring, sameSize],
   );
 
   useEffect(() => {
@@ -436,11 +504,9 @@ export function Preview({
 
   const groupsFor = useCallback((f: Frame) => groupsInFrame(doc.groups, f, frames, widths), [doc.groups, frames, widths]);
   const groups = useMemo(() => (current ? groupsFor(current) : []), [current, groupsFor]);
-  const peekFrame = peek ? frames.find((f) => f.id === peek.frameId) : undefined;
   const peekGroups = useMemo(() => (peekFrame ? groupsFor(peekFrame) : []), [peekFrame, groupsFor]);
 
   /* ---- finger-tracked swipes: only the swipes the author set on the frame ---- */
-  const prog = useMotionValue(0);
   const axisMV = useMotionValue(0); // 0 = x, 1 = y
   const enterMV = useMotionValue(0);
   const exitMV = useMotionValue(0);
@@ -464,7 +530,7 @@ export function Preview({
 
   const onScreenPointerDown = (e: React.PointerEvent) => {
     if (peekRef.current || e.button !== 0) return;
-    gesture.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, phase: "idle", size: PHONE_W, last: 0, lastT: e.timeStamp, vel: 0 };
+    gesture.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, phase: "idle", size: frameW, last: 0, lastT: e.timeStamp, vel: 0 };
     swiped.current = false;
   };
 
@@ -493,7 +559,8 @@ export function Preview({
         const sl = SLIDE_SPEC[pk.t]!;
         g.phase = "drag";
         g.dir = dir;
-        g.size = sl.axis === "x" ? PHONE_W : PHONE_H;
+        const { w, h } = frameSizeOf(cur);
+        g.size = sl.axis === "x" ? w : h;
         swiped.current = true;
         axisMV.set(sl.axis === "x" ? 0 : 1);
         enterMV.set(sl.enter);
@@ -588,7 +655,11 @@ export function Preview({
   const label: React.CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 };
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.22, ease: EASE }}
       style={{
         position: "fixed",
         inset: 0,
@@ -596,33 +667,35 @@ export function Preview({
         background: p.surfaceContainer,
         display: "grid",
         placeItems: "center",
+        boxSizing: "border-box",
+        paddingRight: wide ? WIDE_CONTROL_SPACE : 0,
       }}
     >
       <div
         style={{
-          width: (PHONE_W + BEZEL * 2) * scale,
-          height: (PHONE_H + BEZEL * 2) * scale,
+          width: maxOuterW * scale,
+          height: maxOuterH * scale,
           position: "relative",
-          marginBottom: 56,
+          marginBottom: wide ? 0 : 56,
         }}
       >
-        <div
+        <motion.div
           onPointerDown={onScreenPointerDown}
           style={{
             position: "absolute",
-            left: 0,
-            top: 0,
-            width: PHONE_W + BEZEL * 2,
-            height: PHONE_H + BEZEL * 2,
+            left: shellLeft,
+            top: shellTop,
+            width: shellW,
+            height: shellH,
             transform: `scale(${scale})`,
             touchAction: "none",
             transformOrigin: "0 0",
-            borderRadius: PHONE_R + BEZEL,
+            borderRadius: shellRadius,
             background: p.inverseSurface,
             boxShadow: "0 30px 80px rgba(0,0,0,0.22)",
           }}
         >
-          <div
+          <motion.div
             onClickCapture={(e) => {
               if (swiped.current) {
                 e.stopPropagation();
@@ -633,9 +706,9 @@ export function Preview({
               position: "absolute",
               left: BEZEL,
               top: BEZEL,
-              width: PHONE_W,
-              height: PHONE_H,
-              borderRadius: PHONE_R,
+              width: screenW,
+              height: screenH,
+              borderRadius: screenRadius,
               overflow: "hidden",
               background: p[current.bg ?? "surface"],
               fontFamily: fontFamilyOf(theme.font),
@@ -680,8 +753,8 @@ export function Preview({
                 <Screen frame={peekFrame} groups={peekGroups} {...screenProps} />
               </motion.div>
             )}
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       </div>
 
       <div
@@ -733,7 +806,7 @@ export function Preview({
                 maxWidth: wide ? undefined : 200,
               }}
             >
-              <Icon name="smartphone" size={20} />
+              <Icon name={phone ? "smartphone" : "desktop_windows"} size={20} />
               <span style={{ ...label, flex: wide ? 1 : undefined, textAlign: "left" }}>{current.name || t("screen", lang)}</span>
               <Icon name={wide ? (picker ? "chevron_right" : "chevron_left") : picker ? "expand_more" : "expand_less"} size={18} />
             </button>
@@ -792,7 +865,9 @@ export function Preview({
                           textAlign: "left",
                         }}
                       >
-                        <span style={{ width: 18, display: "inline-flex" }}>{on && <Icon name="check" size={18} />}</span>
+                        <span style={{ width: 18, display: "inline-flex" }}>
+                          {on ? <Icon name="check" size={18} /> : <Icon name={isPhoneFrame(f) ? "smartphone" : "desktop_windows"} size={18} />}
+                        </span>
                         {f.name || t("screen", lang)}
                       </button>
                     );
@@ -807,6 +882,6 @@ export function Preview({
           </button>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

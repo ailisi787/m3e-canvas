@@ -6,6 +6,7 @@ import {
   BACK_TARGET,
   CONTENT_W,
   Frame,
+  FramePreset,
   HALF_W,
   Item,
   KIND_SPEC,
@@ -23,7 +24,12 @@ import {
   VARIANTS,
   Variant,
   actionSlotsOf,
+  contentWidth,
   defaultTabsFor,
+  framePresetOf,
+  frameSizeOf,
+  halfWidth,
+  isPhoneFrame,
   kindLabel,
   toggleIcon,
   iconSlotsOf,
@@ -125,12 +131,39 @@ export function VariantSwatch({
 
 const MAX_IMAGE_PX = 1200;
 
-/** hover text for a width preset that comes from the phone frame */
-export const widthPresetLabel = (v: number): string | undefined =>
-  v === PHONE_W ? t("screenWidth") : v === CONTENT_W ? t("contentWidth") : v === HALF_W ? t("halfWidth") : undefined;
+/** hover text for a width preset derived from the selected frame */
+export const widthPresetLabel = (v: number, frameWidth = PHONE_W): string | undefined =>
+  v === frameWidth ? t("screenWidth") : v === contentWidth(frameWidth) ? t("contentWidth") : v === halfWidth(frameWidth) ? t("halfWidth") : undefined;
 
-const heightPresetLabel = (v: number): string | undefined =>
-  v === PHONE_H ? t("screenHeight") : v === PHONE_H / 2 ? t("halfHeight") : undefined;
+const heightPresetLabel = (v: number, frameHeight = PHONE_H): string | undefined =>
+  v === frameHeight ? t("screenHeight") : v === frameHeight / 2 ? t("halfHeight") : undefined;
+
+export function FrameSizePicker({
+  frame,
+  palette: p,
+  onChange,
+  compact,
+}: {
+  frame: Frame;
+  palette: Palette;
+  onChange: (preset: FramePreset) => void;
+  compact?: boolean;
+}) {
+  const lang = useLang();
+  return (
+    <Segmented<FramePreset>
+      options={[
+        { key: "phone", icon: "smartphone", label: compact ? undefined : t("phoneFrame", lang), title: t("phoneFrame", lang) },
+        { key: "desktop", icon: "desktop_windows", label: compact ? undefined : t("desktopFrame", lang), title: t("desktopFrame", lang) },
+      ]}
+      value={framePresetOf(frame)}
+      onChange={onChange}
+      p={p}
+      height={compact ? 36 : 40}
+      grow={!compact}
+    />
+  );
+}
 
 /** Downscale a picked file so the document stays small enough for localStorage. */
 function readImage(file: File): Promise<string> {
@@ -204,7 +237,7 @@ function FrameChips({
     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
       {chip(null, t("none", lang), "block")}
       {back && chip(BACK_TARGET, t("goBack", lang), "arrow_back")}
-      {frames.map((f) => chip(f.id, f.name || t("screen", lang), "smartphone"))}
+      {frames.map((f) => chip(f.id, f.name || t("screen", lang), isPhoneFrame(f) ? "smartphone" : "desktop_windows"))}
     </div>
   );
 }
@@ -281,6 +314,7 @@ export function FrameInspector({
   tidy,
   onTidy,
   ai,
+  onSize,
 }: {
   frame: Frame;
   palette: Palette;
@@ -295,6 +329,7 @@ export function FrameInspector({
   tidy: TidyState;
   onTidy: () => void;
   ai: AiHooks;
+  onSize: (preset: FramePreset) => void;
 }) {
   const lang = useLang();
   const [copied, setCopied] = useState(false);
@@ -345,14 +380,17 @@ export function FrameInspector({
           color: p.onSecondaryContainer,
         }}
       >
-        <Icon name="smartphone" size={20} />
+        <Icon name={isPhoneFrame(frame) ? "smartphone" : "desktop_windows"} size={20} />
         <span style={{ fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0 }}>{t("screen", lang)}</span>
         <IconBtn icon="play_arrow" p={p} onClick={onPreview} title={t("previewFrom", lang)} size={32} fill />
         <IconBtn icon="content_copy" p={p} onClick={onDuplicate} title={t("duplicate", lang)} size={32} />
         <IconBtn icon="delete" p={p} danger onClick={onDelete} title={t("delete", lang)} size={32} />
       </div>
+      <Section id="frame-size" icon="aspect_ratio" title={t("frameSize", lang)} p={p}>
+        <FrameSizePicker frame={frame} palette={p} onChange={onSize} />
+      </Section>
       <Section id="frame-name" icon="label" title={t("name", lang)} p={p}>
-        <Field value={frame.name} onChange={(name) => onChange({ name })} placeholder={t("screenName", lang)} p={p} icon="smartphone" />
+        <Field value={frame.name} onChange={(name) => onChange({ name })} placeholder={t("screenName", lang)} p={p} icon={isPhoneFrame(frame) ? "smartphone" : "desktop_windows"} />
       </Section>
       <Section id="frame-note" icon="notes" title={t("description", lang)} p={p}>
         <AiField ai={ai} history={frame.noteHistory} onRestore={() => onChange(popHistory(frame.note, frame.noteHistory, "note", "noteHistory"))} p={p} value={frame.note ?? ""} onChange={(note) => onChange({ note: note || undefined })} placeholder={t("screenDescription", lang)} />
@@ -442,6 +480,7 @@ export function Inspector({
   item,
   palette: p,
   frames,
+  frame,
   onChange,
   onDelete,
   onDuplicate,
@@ -455,6 +494,8 @@ export function Inspector({
   item: Item | null;
   palette: Palette;
   frames: Frame[];
+  /** frame containing the selected part; its dimensions bound size controls */
+  frame?: Frame | null;
   onChange: (patch: Partial<Item>) => void;
   onDelete: () => void;
   onDuplicate: () => void;
@@ -550,6 +591,13 @@ export function Inspector({
   }
 
   const spec = KIND_SPEC[item.kind];
+  const frameSize = frame ? frameSizeOf(frame) : { w: PHONE_W, h: PHONE_H };
+  const mapWidthPreset = (v: number) =>
+    v === PHONE_W ? frameSize.w : v === CONTENT_W ? contentWidth(frameSize.w) : v === HALF_W ? halfWidth(frameSize.w) : v;
+  const mapHeightPreset = (v: number) => (v === PHONE_H ? frameSize.h : v === PHONE_H / 2 ? frameSize.h / 2 : v);
+  const widthMax = (max: number) =>
+    max === PHONE_W ? frameSize.w : max === CONTENT_W ? contentWidth(frameSize.w) : max;
+  const heightMax = (max: number) => (max === PHONE_H ? frameSize.h : max);
   const editOn = !!item.toggle && onTab;
   /* the on-state is edited through the same text / icon / style controls:
    * `shown` is what they display, `change` routes their patches into `toggle` */
@@ -972,7 +1020,7 @@ export function Inspector({
                   }
                   value={item.size ?? spec.defSize ?? spec.w}
                   min={spec.size.min}
-                  max={spec.size.max}
+                  max={widthMax(spec.size.max)}
                   step={spec.size.step}
                   onChange={(size) => onChange({ size })}
                   p={p}
@@ -980,13 +1028,13 @@ export function Inspector({
                 />
                 {spec.size.presets && (
                   <SizePresets
-                    values={spec.size.presets}
+                    values={[...new Set(spec.size.presets.map(mapWidthPreset))]}
                     value={item.size ?? spec.defSize ?? spec.w}
                     min={spec.size.min}
-                    max={spec.size.max}
+                    max={widthMax(spec.size.max)}
                     onChange={(size) => onChange({ size })}
                     p={p}
-                    labelOf={item.kind === "text" ? undefined : widthPresetLabel}
+                    labelOf={item.kind === "text" ? undefined : (v) => widthPresetLabel(v, frameSize.w)}
                   />
                 )}
               </>
@@ -998,20 +1046,20 @@ export function Inspector({
                   title={t("height", lang)}
                   value={item.size2 ?? spec.h}
                   min={spec.size2.min}
-                  max={spec.size2.max}
+                  max={heightMax(spec.size2.max)}
                   step={spec.size2.step}
                   onChange={(size2) => onChange({ size2 })}
                   p={p}
                 />
                 {spec.size2.presets && (
                   <SizePresets
-                    values={spec.size2.presets}
+                    values={[...new Set(spec.size2.presets.map(mapHeightPreset))]}
                     value={item.size2 ?? spec.h}
                     min={spec.size2.min}
-                    max={spec.size2.max}
+                    max={heightMax(spec.size2.max)}
                     onChange={(size2) => onChange({ size2 })}
                     p={p}
-                    labelOf={heightPresetLabel}
+                    labelOf={(v) => heightPresetLabel(v, frameSize.h)}
                   />
                 )}
               </>

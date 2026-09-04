@@ -21,16 +21,21 @@ export const SETTLE_MS = 340;
 export const PHONE_W = 412;
 export const PHONE_H = 892;
 export const PHONE_R = 40;
+export const DESKTOP_W = 1280;
+export const DESKTOP_H = 800;
+export const DESKTOP_R = 28;
 /** system insets: the status bar above a top app bar and the gesture area below a navigation bar.
  *  Both bars carry their inset as extra height so their background reaches the rounded screen edge. */
 export const STATUS_BAR_H = 24;
 export const NAV_BAR_H = 24;
 /** M3 layout margin: parts that are not edge-to-edge sit this far from the screen edge */
 export const PHONE_MARGIN = 16;
+export const contentWidth = (width: number) => width - PHONE_MARGIN * 2;
+export const halfWidth = (width: number) => (contentWidth(width) - PHONE_MARGIN) / 2;
 /** width of a part that spans the screen with a margin on both sides */
-export const CONTENT_W = PHONE_W - PHONE_MARGIN * 2;
+export const CONTENT_W = contentWidth(PHONE_W);
 /** width of one of two parts sharing a row, with a margin-sized gutter between them */
-export const HALF_W = (CONTENT_W - PHONE_MARGIN) / 2;
+export const HALF_W = halfWidth(PHONE_W);
 /** width presets offered in the inspector: two columns, with margins, edge-to-edge */
 export const WIDTH_PRESETS = [HALF_W, CONTENT_W, PHONE_W];
 /** height presets for free-form boxes: half the screen, the whole screen */
@@ -573,23 +578,25 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
     noun: "トップアプリバー",
     category: "navigation",
     paletteIcon: "toolbar",
-    w: 412,
+    w: PHONE_W,
     h: 64 + STATUS_BAR_H,
     radius: 0,
     hasVariant: false,
     hasLabel: true,
     hasSupporting: false,
     hasIcon: true,
+    size: { min: 200, max: PHONE_W, step: 4, icon: "width", presets: WIDTH_PRESETS },
     defLabel: "タイトル",
     defIcon: "menu",
     defIcon2: "more_vert",
+    defSize: PHONE_W,
   },
   bottomNav: {
     label: "Navigation Bar",
     noun: "ナビゲーションバー",
     category: "navigation",
     paletteIcon: "bottom_navigation",
-    w: 412,
+    w: PHONE_W,
     h: 80 + NAV_BAR_H,
     radius: 0,
     hasVariant: false,
@@ -597,8 +604,10 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
     hasSupporting: false,
     hasIcon: false,
     hasTabs: true,
+    size: { min: 200, max: PHONE_W, step: 4, icon: "width", presets: WIDTH_PRESETS },
     defLabel: "",
     defIcon: null,
+    defSize: PHONE_W,
   },
   searchBar: {
     label: "Search Bar",
@@ -1291,6 +1300,9 @@ export type Frame = {
   name: string;
   x: number;
   y: number;
+  /** dimensions are optional so documents saved before desktop frames remain phone-sized */
+  w?: number;
+  h?: number;
   bg?: ColorToken;
   /** what this screen is for, in the author's words; goes into the prompt */
   note?: string;
@@ -1300,7 +1312,51 @@ export type Frame = {
   swipe?: Partial<Record<SwipeDir, string>>;
 };
 
-export const frameRect = (f: Frame) => ({ l: f.x, t: f.y, r: f.x + PHONE_W, b: f.y + PHONE_H });
+export type FramePreset = "phone" | "desktop";
+export const frameSizeOf = (f: Frame) => ({ w: f.w ?? PHONE_W, h: f.h ?? PHONE_H });
+export const isPhoneFrame = (f: Frame) => {
+  const { w, h } = frameSizeOf(f);
+  return w === PHONE_W && h === PHONE_H;
+};
+export const framePresetOf = (f: Frame): FramePreset => (isPhoneFrame(f) ? "phone" : "desktop");
+export const framePresetPatch = (preset: FramePreset): Pick<Frame, "w" | "h"> =>
+  preset === "desktop" ? { w: DESKTOP_W, h: DESKTOP_H } : { w: undefined, h: undefined };
+export const frameRect = (f: Frame) => {
+  const { w, h } = frameSizeOf(f);
+  return { l: f.x, t: f.y, r: f.x + w, b: f.y + h };
+};
+/** the corner radius of a screen: a phone's rounded glass, a flatter window for the desktop */
+export const frameRadius = (f: Frame) => (isPhoneFrame(f) ? PHONE_R : DESKTOP_R);
+
+/** parts that span the screen edge to edge and follow its width when it changes */
+export const FULL_WIDTH: Kind[] = ["topAppBar", "bottomNav", "tabs"];
+
+/** A part carried from one screen size to another: edge-to-edge parts take the new
+ *  width, a part sized to the old content or screen width takes the new one, and a
+ *  box as tall as the old screen takes the new height. A card or an image keeps its
+ *  size, since its height follows its width. Nothing ends up wider than the new
+ *  content area. */
+export function carryItemSize(it: Item, from: { w: number; h: number }, to: { w: number; h: number }): Item {
+  const spec = KIND_SPEC[it.kind];
+  const patch: Partial<Item> = {};
+  const keepsShape = it.kind === "card" || it.kind === "image";
+  if (spec.size && (spec.size.icon === "width" || keepsShape)) {
+    /* only a size that is a width; a text size or an icon button's square are left alone */
+    const cur = it.size ?? spec.defSize ?? spec.w;
+    if (FULL_WIDTH.includes(it.kind)) {
+      /* a bar the author narrowed on purpose stays narrow; one that spanned the screen still does */
+      if (cur === from.w || cur > to.w) patch.size = to.w;
+    } else if (keepsShape) {
+      if (cur > contentWidth(to.w)) patch.size = contentWidth(to.w);
+    } else if (cur === from.w) patch.size = to.w;
+    else if (cur === contentWidth(from.w)) patch.size = contentWidth(to.w);
+    else if (cur === halfWidth(from.w)) patch.size = halfWidth(to.w);
+    else if (cur > to.w) patch.size = to.w;
+    else if (cur > contentWidth(to.w) && it.kind !== "box") patch.size = contentWidth(to.w);
+  }
+  if (it.kind === "box" && (it.size2 ?? spec.h) === from.h) patch.size2 = to.h;
+  return Object.keys(patch).length ? { ...it, ...patch } : it;
+}
 
 export type Placed = { item: Item; index: number; x: number; y: number; w: number; h: number };
 
@@ -1420,6 +1476,9 @@ export type FrameMode = "blank" | "phone";
 export type Platform = "android" | "web";
 export const DEFAULT_PLATFORM: Platform = "android";
 export const isPlatform = (v: unknown): v is Platform => v === "android" || v === "web";
+/** The target the prompt assumes when the author has not picked one: the web as
+ *  soon as a desktop screen exists, Android otherwise. */
+export const defaultPlatformOf = (frames: Frame[], mode: FrameMode): Platform => (mode === "phone" && frames.some((f) => !isPhoneFrame(f)) ? "web" : DEFAULT_PLATFORM);
 
 export type Doc = {
   groups: Group[];
@@ -1521,6 +1580,8 @@ export function sizeOf(it: Item, widths: Record<string, number>) {
     case "image":
       return { w: n, h: n };
     case "searchBar":
+    case "topAppBar":
+    case "bottomNav":
     case "listItem":
     case "textField":
     case "slider":
