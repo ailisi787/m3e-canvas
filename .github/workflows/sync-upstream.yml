@@ -1,0 +1,33 @@
+name: Sync upstream
+
+on:
+  schedule:
+    # 01:00 UTC daily (09:00 Beijing)
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream main
+        run: |
+          git remote add upstream https://github.com/lnkiai/m3e-canvas.git
+          git fetch upstream main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-edit upstream/main
+
+      - name: Push
+        run: git push origin main
