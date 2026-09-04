@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { Reorder, useDragControls } from "motion/react";
-import { Frame, Group, KIND_SPEC, Palette } from "@/lib/tokens";
+import { Frame, Group, KIND_SPEC, Palette, kindLabel } from "@/lib/tokens";
 import { Icon } from "./M3Node";
 import { IconBtn } from "./ui";
 import { t, useLang } from "@/lib/i18n";
@@ -34,8 +34,8 @@ function Row({
     g.free
       ? `${t("group", lang)} × ${g.items.length}`
       : g.items.length > 1
-      ? `${spec.label} × ${g.items.length}`
-      : first.label.trim() || (first.kind === "iconButton" || first.kind === "fab" ? (first.icon ?? spec.label) : spec.label);
+      ? `${kindLabel(first.kind, lang)} × ${g.items.length}`
+      : first.label.trim() || (first.kind === "iconButton" || first.kind === "fab" ? (first.icon ?? kindLabel(first.kind, lang)) : kindLabel(first.kind, lang));
   return (
     <Reorder.Item
       value={g.id}

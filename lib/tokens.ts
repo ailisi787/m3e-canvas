@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { FAB_MENU_TABS, KIND_TEXT, NAV_TABS, TAB_LABELS, getLang, t } from "./i18n";
+import { FAB_MENU_TABS, KIND_TEXT, Lang, NAV_TABS, TAB_LABELS, getLang, t } from "./i18n";
 import { Contrast, schemeFromSeed } from "./color";
 
 /* ---------- geometry ---------- */
@@ -968,6 +968,135 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
     defIcon: null,
   },
 };
+
+/** localized names of every kind, shown in the palette, inspector and layers */
+export const KIND_LABEL: Record<Lang, Record<Kind, string>> = {
+  ja: {
+    box: "ボックス",
+    button: "ボタン",
+    iconButton: "アイコンボタン",
+    fab: "FAB",
+    extendedFab: "拡張 FAB",
+    chip: "チップ",
+    topAppBar: "トップアプリバー",
+    bottomNav: "ナビゲーションバー",
+    searchBar: "検索バー",
+    card: "カード",
+    listItem: "リスト項目",
+    dialog: "ダイアログ",
+    snackbar: "スナックバー",
+    textField: "テキスト入力",
+    switch: "スイッチ",
+    checkbox: "チェックボックス",
+    slider: "スライダー",
+    text: "テキスト",
+    image: "画像",
+    divider: "区切り線",
+    loadingIndicator: "ローディングインジケータ",
+    linearProgress: "リニアプログレス",
+    circularProgress: "サーキュラープログレス",
+    splitButton: "スプリットボタン",
+    fabMenu: "FAB メニュー",
+    toolbar: "ツールバー",
+    tabs: "タブ",
+    radio: "ラジオボタン",
+    badge: "バッジ",
+  },
+  en: {
+    box: "Box",
+    button: "Button",
+    iconButton: "Icon Button",
+    fab: "FAB",
+    extendedFab: "Extended FAB",
+    chip: "Chip",
+    topAppBar: "Top App Bar",
+    bottomNav: "Navigation Bar",
+    searchBar: "Search Bar",
+    card: "Card",
+    listItem: "List Item",
+    dialog: "Dialog",
+    snackbar: "Snackbar",
+    textField: "Text Field",
+    switch: "Switch",
+    checkbox: "Checkbox",
+    slider: "Slider",
+    text: "Text",
+    image: "Image",
+    divider: "Divider",
+    loadingIndicator: "Loading Indicator",
+    linearProgress: "Linear Progress",
+    circularProgress: "Circular Progress",
+    splitButton: "Split Button",
+    fabMenu: "FAB Menu",
+    toolbar: "Toolbar",
+    tabs: "Tabs",
+    radio: "Radio Button",
+    badge: "Badge",
+  },
+  zh: {
+    box: "容器框",
+    button: "按钮",
+    iconButton: "图标按钮",
+    fab: "FAB",
+    extendedFab: "扩展 FAB",
+    chip: "标签片",
+    topAppBar: "顶部应用栏",
+    bottomNav: "导航栏",
+    searchBar: "搜索栏",
+    card: "卡片",
+    listItem: "列表项",
+    dialog: "对话框",
+    snackbar: "消息条",
+    textField: "文本输入框",
+    switch: "开关",
+    checkbox: "复选框",
+    slider: "滑块",
+    text: "文本",
+    image: "图片",
+    divider: "分割线",
+    loadingIndicator: "加载指示器",
+    linearProgress: "线性进度条",
+    circularProgress: "圆形进度条",
+    splitButton: "拆分按钮",
+    fabMenu: "FAB 菜单",
+    toolbar: "工具栏",
+    tabs: "标签页",
+    radio: "单选按钮",
+    badge: "徽标",
+  },
+};
+
+export const kindLabel = (kind: Kind, lang: Lang): string => KIND_LABEL[lang][kind] ?? KIND_SPEC[kind].label;
+
+/** localized names of the palette categories */
+export const CATEGORY_LABEL: Record<Lang, Record<Category, string>> = {
+  ja: {
+    actions: "操作",
+    navigation: "导航",
+    containment: "コンテナ",
+    inputs: "入力",
+    content: "コンテンツ",
+    progress: "進行状況",
+  },
+  en: {
+    actions: "Actions",
+    navigation: "Navigation",
+    containment: "Containment",
+    inputs: "Inputs",
+    content: "Content",
+    progress: "Progress",
+  },
+  zh: {
+    actions: "操作",
+    navigation: "导航",
+    containment: "容器",
+    inputs: "输入",
+    content: "内容",
+    progress: "进度",
+  },
+};
+
+export const categoryLabel = (key: Category, lang: Lang): string => CATEGORY_LABEL[lang][key];
 
 export const KIND_ORDER: Kind[] = [
   "button",

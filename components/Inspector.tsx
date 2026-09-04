@@ -24,6 +24,7 @@ import {
   Variant,
   actionSlotsOf,
   defaultTabsFor,
+  kindLabel,
   toggleIcon,
   iconSlotsOf,
   setIconSlot,
@@ -642,7 +643,7 @@ export function Inspector({
         }}
       >
         <Icon name={spec.paletteIcon} size={20} />
-        <span style={{ fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0 }}>{spec.label}</span>
+        <span style={{ fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0 }}>{kindLabel(item.kind, lang)}</span>
         <IconBtn icon="content_copy" p={p} onClick={onDuplicate} title={t("duplicateKey", lang)} size={32} />
         <IconBtn icon="delete" p={p} danger onClick={onDelete} title={t("delete", lang)} size={32} />
       </div>

@@ -87,7 +87,7 @@ import { MotionPanel, ShapePanel, TypePanel } from "@/components/ThemePanel";
 import { ThemeContext, ensureFontLoaded } from "@/lib/theme";
 import { BottomSheet, MobileActionBar, MobileInspector, MobileLang, MobileSettings } from "@/components/Mobile";
 import { ConfirmDialog, IconBtn, Segmented } from "@/components/ui";
-import { Lang, LangContext, isLang, setGlobalLang, t } from "@/lib/i18n";
+import { Lang, LangContext, getLang, isLang, setGlobalLang, t } from "@/lib/i18n";
 
 /** the dragged part's own travel: a little lag reads as weight */
 const CARRY = {
@@ -175,6 +175,8 @@ function migrateGroups(groups: Group[], frames: Frame[]): Group[] {
 }
 
 /** Seed ids are deterministic so server and client render the same markup. */
+const seedText = (ja: string, en: string, zh: string) => (getLang() === "ja" ? ja : getLang() === "zh" ? zh : en);
+
 const seed = (): Group[] => {
   let n = 0;
   const sid = () => `seed${++n}`;
@@ -182,16 +184,20 @@ const seed = (): Group[] => {
   const bar = mk("topAppBar");
   const a = mk("button");
   const b = mk("button");
-  a.label = "お気に入り";
+  a.label = seedText("お気に入り", "Favorites", "收藏");
   a.icon = "star";
-  b.label = "共有";
+  b.label = seedText("共有", "Share", "分享");
   b.icon = "share";
   b.variant = "tonal";
-  const rows = ["受信トレイ", "スター付き", "アーカイブ"].map((t, i) => {
+  const rows = [
+    { label: seedText("受信トレイ", "Inbox", "收件箱"), icon: "inbox" },
+    { label: seedText("スター付き", "Starred", "已加星标"), icon: "star" },
+    { label: seedText("アーカイブ", "Archive", "归档"), icon: "archive" },
+  ].map((row) => {
     const it = mk("listItem");
-    it.label = t;
-    it.icon = ["inbox", "star", "archive"][i];
-    it.supporting = "サブテキスト";
+    it.label = row.label;
+    it.icon = row.icon;
+    it.supporting = seedText("サブテキスト", "Supporting text", "辅助文本");
     return it;
   });
   const nav = mk("bottomNav");
@@ -217,12 +223,12 @@ const mobileSeed = (): Group[] => {
   const a = mk("button");
   const b = mk("button");
   const c = mk("button");
-  a.label = "お気に入り";
+  a.label = seedText("お気に入り", "Favorites", "收藏");
   a.icon = "star";
-  b.label = "共有";
+  b.label = seedText("共有", "Share", "分享");
   b.icon = "share";
   b.variant = "tonal";
-  c.label = "はじめる";
+  c.label = seedText("はじめる", "Get started", "开始");
   c.icon = "arrow_forward";
   return [
     { id: uid(), x: PHONE_MARGIN, y: 120, axis: "x", items: [a, b] },

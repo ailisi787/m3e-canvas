@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CATEGORIES, KIND_ORDER, KIND_SPEC, Kind, Palette } from "@/lib/tokens";
+import { CATEGORIES, KIND_ORDER, KIND_SPEC, Category, Kind, Palette, categoryLabel, kindLabel } from "@/lib/tokens";
 import { Icon } from "./M3Node";
 import { t, useLang } from "@/lib/i18n";
 import { Field, Section, Tile } from "./ui";
@@ -27,9 +27,10 @@ export function PartsPalette({
     if (!s) return KIND_ORDER;
     return KIND_ORDER.filter((k) => {
       const sp = KIND_SPEC[k];
-      return sp.label.toLowerCase().includes(s) || sp.noun.includes(s) || k.toLowerCase().includes(s);
+      const label = kindLabel(k, lang).toLowerCase();
+      return label.includes(s) || sp.label.toLowerCase().includes(s) || sp.noun.includes(s) || k.toLowerCase().includes(s);
     });
-  }, [q]);
+  }, [q, lang]);
 
   const tile = (k: Kind) => {
     const s = KIND_SPEC[k];
@@ -37,7 +38,7 @@ export function PartsPalette({
       <Tile
         key={k}
         icon={s.paletteIcon}
-        label={s.label}
+        label={kindLabel(k, lang)}
         p={p}
         onPointerDown={(e) => onPartPointerDown(e, k)}
         starred={favorites.includes(k)}
@@ -75,7 +76,7 @@ export function PartsPalette({
           </div>
         ) : (
           CATEGORIES.map((c) => (
-            <Section key={c.key} id={`cat:${c.key}`} icon={c.icon} title={c.label} p={p}>
+            <Section key={c.key} id={`cat:${c.key}`} icon={c.icon} title={categoryLabel(c.key, lang)} p={p}>
               <div style={grid}>{KIND_ORDER.filter((k) => KIND_SPEC[k].category === c.key).map(tile)}</div>
             </Section>
           ))
