@@ -287,7 +287,7 @@ export default function Page() {
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME);
   const patchTheme = (patch: Partial<Theme>) => setTheme((t) => ({ ...t, ...patch }));
   const [frame, setFrame] = useState<FrameMode>("phone");
-  const [lang, setLang] = useState<Lang>("ja");
+  const [lang, setLang] = useState<Lang>("zh");
   const [isMobile, setIsMobile] = useState(false);
   const [sheet, setSheet] = useState<"edit" | "settings" | "lang" | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -489,8 +489,9 @@ export default function Page() {
         if (isLang(ui.lang)) setLang(ui.lang);
       } else {
         const nl = (navigator.language ?? "").toLowerCase();
-        if (nl.startsWith("zh")) setLang("zh");
-        else if (!nl.startsWith("ja")) setLang("en");
+        if (nl.startsWith("ja")) setLang("ja");
+        else if (nl.startsWith("en")) setLang("en");
+        else setLang("zh");
         queueMicrotask(() => fitRef.current());
       }
     } catch {}

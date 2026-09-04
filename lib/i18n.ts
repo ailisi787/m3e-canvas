@@ -12,13 +12,13 @@ export const isLang = (v: unknown): v is Lang => v === "ja" || v === "en" || v =
 
 /* A module-level copy lets non-React helpers (item defaults, prompt text)
  * follow the language without threading it through every call. */
-let current: Lang = "ja";
+let current: Lang = "zh";
 export const getLang = () => current;
 export const setGlobalLang = (l: Lang) => {
   current = l;
 };
 
-export const LangContext = createContext<Lang>("ja");
+export const LangContext = createContext<Lang>("zh");
 export const useLang = () => useContext(LangContext);
 
 type Str = { ja: string; en: string; zh: string };
