@@ -1,4 +1,4 @@
-import { Doc, KIND_ORDER, Kind, VARIANTS, isPlatform } from "./tokens";
+import { Doc, KIND_ORDER, Kind, VARIANTS, isPlace, isPlatform } from "./tokens";
 
 /* A project file is the Doc as JSON, nothing more. Reading one back only checks
  * the shape the editor relies on; the same migrations that run on a saved
@@ -8,10 +8,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 
 const KINDS = new Set<string>(KIND_ORDER);
 
-const validTabs = (tabs: unknown) => tabs === undefined || (Array.isArray(tabs) && tabs.every((tab) => isRecord(tab) && typeof tab.label === "string" && typeof tab.icon === "string"));
+const validTabs = (tabs: unknown) =>
+  tabs === undefined || (Array.isArray(tabs) && tabs.every((tab) => isRecord(tab) && typeof tab.label === "string" && (typeof tab.icon === "string" || tab.icon === null || tab.icon === undefined)));
+
+const validCorners = (c: unknown) => c === undefined || (isRecord(c) && ["tl", "tr", "bl", "br"].every((k) => Number.isFinite(c[k])));
 
 const validItem = (item: unknown) =>
   isRecord(item) &&
+  validCorners(item.corners) &&
   typeof item.id === "string" &&
   typeof item.kind === "string" &&
   KINDS.has(item.kind as Kind) &&
@@ -19,6 +23,7 @@ const validItem = (item: unknown) =>
   (typeof item.icon === "string" || item.icon === null) &&
   VARIANTS.some((variant) => variant.key === item.variant) &&
   (item.supporting === undefined || typeof item.supporting === "string") &&
+  (item.selected === undefined || Number.isFinite(item.selected)) &&
   (item.note === undefined || typeof item.note === "string") &&
   validTabs(item.tabs);
 
@@ -40,7 +45,8 @@ const validFrame = (frame: unknown) =>
   Number.isFinite(frame.y) &&
   (frame.w === undefined || (Number.isFinite(frame.w) && (frame.w as number) > 0)) &&
   (frame.h === undefined || (Number.isFinite(frame.h) && (frame.h as number) > 0)) &&
-  (frame.note === undefined || typeof frame.note === "string");
+  (frame.note === undefined || typeof frame.note === "string") &&
+  (frame.place === undefined || isPlace(frame.place));
 
 /** whether a parsed file has the shape of a document the editor can open */
 export const isProject = (value: unknown): value is Doc =>

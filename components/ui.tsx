@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { COLOR_TOKENS, ColorToken, Palette, R_INNER, clamp } from "@/lib/tokens";
+import { useEffect, useRef, useState } from "react";
+import { COLOR_TOKENS, ColorToken, PLACES, Palette, Place, R_INNER, clamp } from "@/lib/tokens";
 import { AnimatePresence, motion } from "motion/react";
-import { t, useLang } from "@/lib/i18n";
+import { COLOR_TOKEN_TEXT, t, useLang } from "@/lib/i18n";
 import { Icon } from "./M3Node";
 
 export function IconBtn({
@@ -233,11 +233,19 @@ export function Field({
 /** Slider with a typed-in number beside it. The slider moves in `step`s; the
  *  field accepts any whole number and is clamped to min..max when it commits. */
 /** A rectangle whose top or bottom corners are rounded: the corner-radius slider icons. */
-export function CornerIcon({ side, size = 20 }: { side: "top" | "bottom"; size?: number }) {
-  const d =
-    side === "top"
-      ? "M4 17 V9 a5 5 0 0 1 5 -5 h6 a5 5 0 0 1 5 5 v8"
-      : "M4 3 v8 a5 5 0 0 0 5 5 h6 a5 5 0 0 0 5 -5 v-8";
+/** a pair of corners on one side, or a single corner */
+export function CornerIcon({ side, size = 20 }: { side: "top" | "bottom" | "left" | "right" | "tl" | "tr" | "bl" | "br"; size?: number }) {
+  const PATHS: Record<typeof side, string> = {
+    top: "M4 17 V9 a5 5 0 0 1 5 -5 h6 a5 5 0 0 1 5 5 v8",
+    bottom: "M4 3 v8 a5 5 0 0 0 5 5 h6 a5 5 0 0 0 5 -5 v-8",
+    left: "M17 4 H9 a5 5 0 0 0 -5 5 v6 a5 5 0 0 0 5 5 h8",
+    right: "M7 4 h8 a5 5 0 0 1 5 5 v6 a5 5 0 0 1 -5 5 h-8",
+    tl: "M5 20 V11 a6 6 0 0 1 6 -6 H20",
+    tr: "M4 5 H13 a6 6 0 0 1 6 6 V20",
+    bl: "M5 4 V13 a6 6 0 0 0 6 6 H20",
+    br: "M20 4 V13 a6 6 0 0 1 -6 6 H4",
+  };
+  const d = PATHS[side];
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden>
       <path d={d} />
@@ -696,12 +704,13 @@ export function TokenChips({
       )}
       {COLOR_TOKENS.map((t) => {
         const on = !noneOn && t.key === value;
+        const label = lang === "en" ? t.label : COLOR_TOKEN_TEXT[lang][t.key];
         return (
           <button
             key={t.key}
             onClick={() => onChange(t.key)}
-            title={t.label}
-            aria-label={t.label}
+            title={label}
+            aria-label={label}
             aria-pressed={on}
             className="m3-press"
             style={{
@@ -732,11 +741,54 @@ export type TidyState = "tidy" | "undo" | "done";
 
 /** One button that reads as "Tidy", turns into "Undo tidy" right after, and is
  *  disabled while the screen is already tidy. */
-export function TidyButton({ state, onClick, p, pill }: { state: TidyState; onClick: () => void; p: Palette; /** the toolbar version next to the zoom pill */ pill?: boolean }) {
+export function TidyButton({
+  state,
+  onClick,
+  p,
+  pill,
+  place,
+  onPlace,
+}: {
+  state: TidyState;
+  onClick: () => void;
+  p: Palette;
+  /** the toolbar version next to the zoom pill */
+  pill?: boolean;
+  /** where the screen's body goes; with `onPlace` the button gains a trailing menu to change it */
+  place?: Place;
+  onPlace?: (place: Place) => void;
+}) {
   const lang = useLang();
   const done = state === "done";
   const label = state === "undo" ? t("tidyUndo", lang) : state === "done" ? t("tidyDone", lang) : t("tidy", lang);
-  return (
+  const [menu, setMenu] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  /* the menu closes on a tap anywhere else or on Escape */
+  useEffect(() => {
+    if (!menu) return;
+    const away = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setMenu(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      /* the editor also clears its selection on Escape; closing the menu is enough here */
+      e.stopPropagation();
+      setMenu(false);
+    };
+    document.addEventListener("pointerdown", away, true);
+    document.addEventListener("keydown", key, true);
+    return () => {
+      document.removeEventListener("pointerdown", away, true);
+      document.removeEventListener("keydown", key, true);
+    };
+  }, [menu]);
+  const split = !!onPlace;
+  const current = place ?? "top";
+  const placeLabel = (k: Place) => t(k === "top" ? "placeTop" : k === "center" ? "placeCenter" : k === "bottom" ? "placeBottom" : "placeSpread", lang);
+  const h = pill ? 40 : 44;
+  const bg = done ? "transparent" : state === "undo" ? p.tertiaryContainer : p.secondaryContainer;
+  const fg = done ? p.onSurfaceVariant : state === "undo" ? p.onTertiaryContainer : p.onSecondaryContainer;
+  const main = (
     <button
       onClick={onClick}
       disabled={done}
@@ -744,13 +796,14 @@ export function TidyButton({ state, onClick, p, pill }: { state: TidyState; onCl
       aria-label={label}
       className="m3-press"
       style={{
-        width: pill ? (done ? 40 : undefined) : "100%",
-        height: pill ? 40 : 44,
+        width: pill ? (done ? 40 : undefined) : split ? undefined : "100%",
+        flex: split && !pill ? 1 : undefined,
+        height: h,
         padding: done ? 0 : pill ? "0 16px 0 12px" : "0 16px",
-        borderRadius: pill ? 20 : 22,
+        borderRadius: split && !done ? `${h / 2}px ${R_INNER}px ${R_INNER}px ${h / 2}px` : h / 2,
         border: "none",
-        background: done ? "transparent" : state === "undo" ? p.tertiaryContainer : p.secondaryContainer,
-        color: done ? p.onSurfaceVariant : state === "undo" ? p.onTertiaryContainer : p.onSecondaryContainer,
+        background: bg,
+        color: fg,
         fontSize: 13,
         fontWeight: 600,
         cursor: done ? "default" : "pointer",
@@ -765,6 +818,84 @@ export function TidyButton({ state, onClick, p, pill }: { state: TidyState; onCl
       <Icon name={state === "undo" ? "undo" : state === "done" ? "check" : "align_space_even"} size={done ? 22 : 20} />
       {!done && label}
     </button>
+  );
+  if (!split) return main;
+  /* a split button: tidy on the left, the placement menu behind the chevron, 3dp apart like a connected pair */
+  return (
+    <div ref={ref} style={{ position: "relative", display: "flex", gap: 3, alignItems: "center", width: pill ? undefined : "100%" }}>
+      {main}
+      <button
+        onClick={() => setMenu((m) => !m)}
+        title={t("placement", lang)}
+        aria-label={t("placement", lang)}
+        aria-expanded={menu}
+        aria-haspopup="true"
+        className="m3-press"
+        style={{
+          height: h,
+          width: h,
+          borderRadius: done ? h / 2 : `${R_INNER}px ${h / 2}px ${h / 2}px ${R_INNER}px`,
+          border: "none",
+          background: done ? "transparent" : bg,
+          color: done ? p.onSurfaceVariant : fg,
+          cursor: "pointer",
+          display: "grid",
+          placeItems: "center",
+          flex: "0 0 auto",
+        }}
+      >
+        <Icon name={PLACES.find((o) => o.key === current)?.icon ?? "vertical_align_top"} size={20} />
+      </button>
+      {menu && (
+        /* the placement choices as one compact row of icon buttons, floating off the chevron */
+        <div
+          role="group"
+          aria-label={t("placement", lang)}
+          style={{
+            position: "absolute",
+            ...(pill ? { bottom: "100%", marginBottom: 8 } : { top: "100%", marginTop: 8 }),
+            right: 0,
+            display: "flex",
+            gap: 3,
+            padding: 4,
+            borderRadius: 24,
+            background: p.surfaceContainer,
+            boxShadow: "0 2px 6px rgba(0,0,0,0.15), 0 8px 24px rgba(0,0,0,0.12)",
+            zIndex: 30,
+          }}
+        >
+          {PLACES.map((o) => {
+            const on = current === o.key;
+            return (
+              <button
+                key={o.key}
+                aria-pressed={on}
+                title={placeLabel(o.key)}
+                aria-label={placeLabel(o.key)}
+                onClick={() => {
+                  setMenu(false);
+                  onPlace(o.key);
+                }}
+                className="m3-press"
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  border: "none",
+                  background: on ? p.secondaryContainer : "transparent",
+                  color: on ? p.onSecondaryContainer : p.onSurfaceVariant,
+                  cursor: "pointer",
+                  display: "grid",
+                  placeItems: "center",
+                }}
+              >
+                <Icon name={o.icon} size={22} fill={on} />
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 

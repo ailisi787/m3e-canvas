@@ -34,6 +34,11 @@ import {
   normalizeTheme,
   toggleIcon,
   uniformRadii,
+  RAIL_W,
+  RAIL_TOP,
+  RAIL_ITEM_H,
+  RAIL_GAP,
+  sizeOf,
 } from "@/lib/tokens";
 import { Icon, M3Node } from "./M3Node";
 import { IconBtn } from "./ui";
@@ -140,6 +145,9 @@ function Tappable({
   onTap,
   onSlot,
   onValue,
+  onPick,
+  menuOpen,
+  onMenu,
 }: {
   item: Item;
   p: Palette;
@@ -150,11 +158,34 @@ function Tappable({
   onSlot?: (slot: string) => void;
   /** live value for sliders */
   onValue?: (v: number) => void;
+  /** an option chosen from a dropdown's menu */
+  onPick?: (index: number) => void;
+  /** whether this dropdown's menu is the open one; the screen keeps at most one open */
+  menuOpen?: boolean;
+  onMenu?: (open: boolean) => void;
 }) {
   const [pressed, setPressed] = useState(false);
   const [hot, setHot] = useState<string | null>(null);
-  const live = !!onTap || (TAPPABLE.includes(item.kind) && item.kind !== "text");
+  const menu = !!menuOpen;
+  const live = !!onTap || !!onPick || (TAPPABLE.includes(item.kind) && item.kind !== "text");
   const ref = useRef<HTMLDivElement>(null);
+
+  /* the open menu closes on a tap anywhere else or on Escape */
+  useEffect(() => {
+    if (!menu || !onMenu) return;
+    const away = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onMenu(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onMenu(false);
+    };
+    document.addEventListener("pointerdown", away, true);
+    document.addEventListener("keydown", key, true);
+    return () => {
+      document.removeEventListener("pointerdown", away, true);
+      document.removeEventListener("keydown", key, true);
+    };
+  }, [menu, onMenu]);
 
   const dragValue = (e: React.PointerEvent) => {
     const r = ref.current?.getBoundingClientRect();
@@ -165,13 +196,20 @@ function Tappable({
   /** hit areas for the icons on a top app bar and the destinations on a navigation bar */
   const slots: { key: string; style: React.CSSProperties }[] = [];
   if (onSlot && item.kind === "topAppBar") {
-    if (item.icon) slots.push({ key: "icon", style: { left: 4, top: STATUS_BAR_H + 8, width: 48, height: 48, borderRadius: 24 } });
-    if (item.icon2) slots.push({ key: "icon2", style: { right: 4, top: STATUS_BAR_H + 8, width: 48, height: 48, borderRadius: 24 } });
+    /* the icons sit below the status-bar inset only where the bar has one (see sizeOf) */
+    const inset = sizeOf(item, {}).h - 64;
+    if (item.icon) slots.push({ key: "icon", style: { left: 4, top: inset + 8, width: 48, height: 48, borderRadius: 24 } });
+    if (item.icon2) slots.push({ key: "icon2", style: { right: 4, top: inset + 8, width: 48, height: 48, borderRadius: 24 } });
   }
   if (onSlot && (item.kind === "bottomNav" || item.kind === "tabs")) {
     const n = item.tabs?.length ?? 0;
     for (let i = 0; i < n; i++)
       slots.push({ key: `tab:${i}`, style: { left: `${(i / n) * 100}%`, width: `${100 / n}%`, top: 0, bottom: item.kind === "bottomNav" ? NAV_BAR_H : 0, borderRadius: 16 } });
+  }
+  if (onSlot && item.kind === "navRail") {
+    const n = item.tabs?.length ?? 0;
+    for (let i = 0; i < n; i++)
+      slots.push({ key: `tab:${i}`, style: { left: 6, width: RAIL_W - 12, top: RAIL_TOP + i * (RAIL_ITEM_H + RAIL_GAP), height: RAIL_ITEM_H, borderRadius: 16 } });
   }
   if (onSlot && item.kind === "toolbar") {
     const n = item.tabs?.length ?? 0;
@@ -202,7 +240,7 @@ function Tappable({
       onPointerUp={() => setPressed(false)}
       onPointerCancel={() => setPressed(false)}
       onPointerLeave={() => !onValue && setPressed(false)}
-      onClick={onTap}
+      onClick={onPick ? () => onMenu?.(!menu) : onTap}
       style={{ cursor: live || onValue ? "pointer" : "default", display: "flex", position: "relative", touchAction: "none" }}
     >
       <M3Node item={item} palette={p} widths={widths} radii={radii} interactive={false} pressed={pressed && !onValue} />
@@ -247,9 +285,55 @@ function Tappable({
           }}
         />
       ))}
+      {onPick && menu && (
+        /* the dropdown's menu, under the field: surfaceContainer, 48dp items, the chosen one tinted */
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: "100%",
+            marginTop: 4,
+            padding: "8px 0",
+            maxHeight: 48 * 6 + 16,
+            overflowY: "auto",
+            borderRadius: 4,
+            background: p.surfaceContainer,
+            color: p.onSurface,
+            boxShadow: "0 2px 6px rgba(0,0,0,0.15), 0 8px 24px rgba(0,0,0,0.12)",
+            zIndex: 2,
+          }}
+        >
+          {(item.tabs ?? []).map((opt, i) => (
+            <div
+              key={i}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPick(i);
+                onMenu?.(false);
+              }}
+              style={{
+                height: 48,
+                display: "flex",
+                alignItems: "center",
+                padding: "0 12px",
+                fontSize: 16,
+                cursor: "pointer",
+                background: item.selected === i ? `color-mix(in srgb, ${p.onSurface} 12%, transparent)` : "transparent",
+                ...ellipsisText,
+              }}
+            >
+              {opt.label}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
+
+const ellipsisText: React.CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 
 function Screen({
   frame,
@@ -273,6 +357,8 @@ function Screen({
   values: Record<string, number>;
   onValue: (id: string, v: number) => void;
 }) {
+  /* the dropdown whose menu is open, if any; its group is lifted above the rest */
+  const [menuId, setMenuId] = useState<string | null>(null);
   return (
     <div style={{ position: "absolute", inset: 0, background: p[frame.bg ?? "surface"], overflow: "hidden" }}>
       {groups.map((g) => (
@@ -280,11 +366,12 @@ function Screen({
           key={g.id}
           style={
             g.free
-              ? { position: "absolute", left: g.x - frame.x, top: g.y - frame.y }
+              ? { position: "absolute", left: g.x - frame.x, top: g.y - frame.y, zIndex: g.items.some((it) => it.id === menuId) ? 2 : undefined }
               : {
                   position: "absolute",
                   left: g.x - frame.x,
                   top: g.y - frame.y,
+                  zIndex: g.items.some((it) => it.id === menuId) ? 2 : undefined,
                   display: "flex",
                   flexDirection: g.axis === "x" ? "row" : "column",
                   alignItems: g.axis === "x" ? "center" : "stretch",
@@ -317,6 +404,11 @@ function Screen({
             const act = it.action;
             let shown = flipped.has(it.id) ? flippedLook(it) : it;
             if (it.kind === "slider" && values[it.id] !== undefined) shown = { ...shown, value: values[it.id] };
+            if (it.kind === "select" && values[it.id] !== undefined) shown = { ...shown, selected: values[it.id] };
+            const navKind = it.kind === "bottomNav" || it.kind === "navRail" || it.kind === "tabs";
+            /* bars with the same destinations are one bar to the visitor: the choice follows them across screens */
+            const navKey = navKind ? `nav:${it.kind}:${(it.tabs ?? []).map((t) => t.label).join("|")}` : "";
+            if (navKind && values[navKey] !== undefined && values[navKey] >= 0) shown = { ...shown, selected: values[navKey] };
             const tap =
               act || flips(it)
                 ? () => {
@@ -333,8 +425,21 @@ function Screen({
                 radii={radii}
                 widths={widths}
                 onTap={tap}
-                onSlot={slotActions ? (slot) => slotActions[slot] && onAction(slotActions[slot]) : undefined}
+                onSlot={
+                  slotActions || navKind
+                    ? (slot) => {
+                        /* a tapped destination lights up where it opens nothing; where it opens a
+                           screen, that screen's bar shows its own selected destination */
+                        const a = slotActions?.[slot];
+                        if (navKind && slot.startsWith("tab:")) onValue(navKey, a ? -1 : Number(slot.slice(4)));
+                        if (a) onAction(a);
+                      }
+                    : undefined
+                }
                 onValue={it.kind === "slider" ? (v) => onValue(it.id, v) : undefined}
+                onPick={it.kind === "select" ? (i) => onValue(it.id, i) : undefined}
+                menuOpen={menuId === it.id}
+                onMenu={it.kind === "select" ? (open) => setMenuId(open ? it.id : null) : undefined}
               />
             );
             if (!g.free) return node;
@@ -711,7 +816,7 @@ export function Preview({
               borderRadius: screenRadius,
               overflow: "hidden",
               background: p[current.bg ?? "surface"],
-              fontFamily: fontFamilyOf(theme.font),
+              fontFamily: fontFamilyOf(theme.font, lang),
               touchAction: "none",
             }}
           >

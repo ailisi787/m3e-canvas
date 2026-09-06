@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { motion, useDragControls } from "motion/react";
-import { CONTRASTS, Contrast, FONTS, Item, KIND_SPEC, NavTab, PALETTES, Palette, SHAPES, ShapeScale, Theme, defaultTabsFor, iconSlotsOf, kindLabel, setIconSlot } from "@/lib/tokens";
+import { CONTRASTS, Contrast, FONTS, Item, KIND_SPEC, NavTab, PALETTES, Palette, SHAPES, ShapeScale, Theme, defaultTabsFor, iconSlotsOf, setIconSlot } from "@/lib/tokens";
 import { ensureFontLoaded } from "@/lib/theme";
-import { LANGS, Lang, t, useLang } from "@/lib/i18n";
+import { KIND_TEXT, LANGS, Lang, t, useLang } from "@/lib/i18n";
 import { IconPicker } from "./IconPicker";
 import { Icon } from "./M3Node";
 import { VariantSwatch, variantsOf } from "./Inspector";
@@ -126,8 +126,10 @@ export function MobileInspector({
     const defaults = defaultTabsFor(item.kind);
     const next: NavTab[] = [];
     for (let i = 0; i < n; i++) next.push(tabs[i] ? { ...tabs[i] } : { ...defaults[i % defaults.length] });
-    onChange({ tabs: next });
+    onChange({ tabs: next, selected: item.selected !== undefined && item.selected >= n ? undefined : item.selected });
   };
+  /* a dropdown's rows are options: no icons, and one of them may be the initial value */
+  const isSelect = item.kind === "select";
 
   return (
     <div>
@@ -145,7 +147,7 @@ export function MobileInspector({
         >
           <Icon name={spec.paletteIcon} size={22} />
         </div>
-        <span style={{ fontSize: 16, fontWeight: 700, color: p.onSurface, flex: 1 }}>{kindLabel(item.kind, lang)}</span>
+        <span style={{ fontSize: 16, fontWeight: 700, color: p.onSurface, flex: 1 }}>{KIND_TEXT[lang][item.kind]?.noun ?? spec.label}</span>
         <IconBtn icon="content_copy" p={p} onClick={onDuplicate} title={t("duplicate", lang)} size={44} />
         <IconBtn icon="delete" p={p} danger onClick={onDelete} title={t("delete", lang)} size={44} />
         <IconBtn icon="check" p={p} on onClick={onClose} title={t("done", lang)} size={44} />
@@ -177,26 +179,57 @@ export function MobileInspector({
       )}
 
       {spec.hasTabs && (
-        <Row icon="view_column" label={t("tabs", lang)} p={p}>
-          <Segmented
-            options={(item.kind === "toolbar" ? [2, 3, 4, 5, 6] : [2, 3, 4, 5]).map((n) => ({ key: String(n), label: String(n) }))}
-            value={String(tabs.length)}
-            onChange={(k) => setTabCount(Number(k))}
-            p={p}
-            height={44}
-          />
+        <Row icon={isSelect ? "list" : "view_column"} label={t(isSelect ? "options" : "tabs", lang)} p={p}>
+          {!isSelect && (
+            <Segmented
+              options={(item.kind === "toolbar" ? [2, 3, 4, 5, 6] : [2, 3, 4, 5]).map((n) => ({ key: String(n), label: String(n) }))}
+              value={String(tabs.length)}
+              onChange={(k) => setTabCount(Number(k))}
+              p={p}
+              height={44}
+            />
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
             {tabs.map((tab, i) => (
               <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                {item.kind !== "tabs" && (
+                {isSelect && (
+                  <IconBtn
+                    icon={item.selected === i ? "radio_button_checked" : "radio_button_unchecked"}
+                    p={p}
+                    size={48}
+                    on={item.selected === i}
+                    onClick={() => onChange({ selected: item.selected === i ? undefined : i })}
+                    title={t("selectedOption", lang)}
+                  />
+                )}
+                {item.kind !== "tabs" && !isSelect && (
                   <IconBtn icon={tab.icon || "add"} p={p} size={48} on={tabSlot === i} onClick={() => setTabSlot(tabSlot === i ? null : i)} title={t("changeIcon", lang)} />
                 )}
                 {item.kind !== "toolbar" && (
                   <Field value={tab.label} onChange={(label) => onChange({ tabs: tabs.map((x, j) => (j === i ? { ...x, label } : x)) })} placeholder={t("label", lang)} p={p} height={48} />
                 )}
+                {isSelect && tabs.length > 1 && (
+                  <IconBtn
+                    icon="close"
+                    p={p}
+                    size={48}
+                    onClick={() => onChange({ tabs: tabs.filter((_, j) => j !== i), selected: item.selected === undefined ? undefined : item.selected === i ? undefined : item.selected > i ? item.selected - 1 : item.selected })}
+                    title={t("removeOption", lang)}
+                  />
+                )}
               </div>
             ))}
           </div>
+          {isSelect && (
+            <button
+              onClick={() => onChange({ tabs: [...tabs, { ...defaultTabsFor(item.kind)[tabs.length % defaultTabsFor(item.kind).length] }] })}
+              className="m3-press"
+              style={{ marginTop: 8, height: 48, width: "100%", borderRadius: 24, border: `1px solid ${p.outline}`, background: "transparent", color: p.primary, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+            >
+              <Icon name="add" size={20} />
+              {t("addOption", lang)}
+            </button>
+          )}
           {tabSlot !== null && tabs[tabSlot] && (
             <div style={{ marginTop: 8 }}>
               <IconPicker value={tabs[tabSlot].icon || null} onChange={(icon) => onChange(setIconSlot(item, `tab:${tabSlot}`, icon))} palette={p} />

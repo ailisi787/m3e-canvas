@@ -2,13 +2,14 @@
 
 import { createContext, useContext } from "react";
 
-export type Lang = "ja" | "en" | "zh";
+export type Lang = "ja" | "en" | "zh" | "ko";
 export const LANGS: { key: Lang; label: string }[] = [
   { key: "ja", label: "日本語" },
   { key: "en", label: "English" },
   { key: "zh", label: "中文" },
+  { key: "ko", label: "한국어" },
 ];
-export const isLang = (v: unknown): v is Lang => v === "ja" || v === "en" || v === "zh";
+export const isLang = (v: unknown): v is Lang => v === "ja" || v === "en" || v === "zh" || v === "ko";
 
 /* A module-level copy lets non-React helpers (item defaults, prompt text)
  * follow the language without threading it through every call. */
@@ -21,9 +22,52 @@ export const setGlobalLang = (l: Lang) => {
 export const LangContext = createContext<Lang>("zh");
 export const useLang = () => useContext(LangContext);
 
+export const SEED_TEXT: Record<Lang, { favorite: string; share: string; inbox: string; starred: string; archive: string; supporting: string; start: string }> = {
+  ja: { favorite: "お気に入り", share: "共有", inbox: "受信トレイ", starred: "スター付き", archive: "アーカイブ", supporting: "サブテキスト", start: "はじめる" },
+  en: { favorite: "Favorite", share: "Share", inbox: "Inbox", starred: "Starred", archive: "Archive", supporting: "Supporting text", start: "Get started" },
+  zh: { favorite: "收藏", share: "分享", inbox: "收件箱", starred: "已加星标", archive: "归档", supporting: "辅助文本", start: "开始" },
+  ko: { favorite: "즐겨찾기", share: "공유", inbox: "받은편지함", starred: "별표 표시", archive: "보관함", supporting: "보조 텍스트", start: "시작하기" },
+};
+
+/** ponytail: matches defaults by text; add provenance if authored copies must be distinguished. */
+export function translateDefaultText(value: string, kind: string, field: "label" | "supporting" | "tab", lang: Lang): string {
+  for (const { key: from } of LANGS) {
+    if (field === "tab") {
+      const labels = (l: Lang) => kind === "tabs" ? TAB_LABELS[l] : kind === "select" ? SELECT_OPTIONS[l] : (kind === "fabMenu" ? FAB_MENU_TABS[l] : NAV_TABS[l]).map((tab) => tab.label);
+      const index = labels(from).indexOf(value);
+      if (index >= 0) return labels(lang)[index] ?? value;
+    } else {
+      if (value && value === KIND_TEXT[from][kind]?.[field]) return KIND_TEXT[lang][kind]?.[field] ?? value;
+      const keys: (keyof typeof SEED_TEXT.en)[] = field === "supporting" ? ["supporting"] : kind === "button" ? ["favorite", "share", "start"] : kind === "listItem" ? ["inbox", "starred", "archive"] : [];
+      for (const key of keys) {
+        if (value === SEED_TEXT[from][key]) return SEED_TEXT[lang][key];
+      }
+    }
+  }
+  return value;
+}
+
 type Str = { ja: string; en: string; zh: string };
 
-const UI = {
+export function translateDefaultFrameName(name: string, lang: Lang): string {
+  for (const { key } of LANGS) {
+    if (name === t("home", key)) return t("home", lang);
+    const prefix = `${t("screenN", key)} `;
+    if (name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length))) {
+      return `${t("screenN", lang)} ${name.slice(prefix.length)}`;
+    }
+  }
+  return name;
+}
+
+export const COLOR_TOKEN_TEXT = {
+  ja: { surface: "サーフェス", surfaceContainerLow: "コンテナ（低）", surfaceContainer: "コンテナ", surfaceContainerHigh: "コンテナ（高）", surfaceContainerHighest: "コンテナ（最高）", primaryContainer: "プライマリコンテナ", secondaryContainer: "セカンダリコンテナ", tertiaryContainer: "ターシャリコンテナ", primary: "プライマリ", inverseSurface: "反転サーフェス" },
+  zh: { surface: "表面", surfaceContainerLow: "低层容器", surfaceContainer: "容器", surfaceContainerHigh: "高层容器", surfaceContainerHighest: "最高层容器", primaryContainer: "主色容器", secondaryContainer: "次色容器", tertiaryContainer: "第三色容器", primary: "主色", inverseSurface: "反色表面" },
+  ko: { surface: "표면", surfaceContainerLow: "낮은 컨테이너", surfaceContainer: "컨테이너", surfaceContainerHigh: "높은 컨테이너", surfaceContainerHighest: "가장 높은 컨테이너", primaryContainer: "주 색상 컨테이너", secondaryContainer: "보조 색상 컨테이너", tertiaryContainer: "세 번째 색상 컨테이너", primary: "주 색상", inverseSurface: "반전 표면" },
+};
+
+/** exported for the parity tests only; read strings through t() */
+export const UI = {
   // panels
   parts: { ja: "部品", en: "Parts", zh: "组件" },
   layers: { ja: "レイヤー", en: "Layers", zh: "图层" },
@@ -65,16 +109,51 @@ const UI = {
   saveProject: { ja: "プロジェクトを保存", en: "Save project", zh: "保存项目" },
   openProject: { ja: "プロジェクトを開く", en: "Open project", zh: "打开项目" },
   replaceProjectTitle: { ja: "プロジェクトを開きますか？", en: "Open this project?", zh: "要打开这个项目吗？" },
+  askAi: { ja: "AI に頼む", en: "Ask an AI", zh: "让 AI 来画" },
+  askAiHint: {
+    ja: "作りたいものを書いて「AI で作る」を押すと、AI タブのキーで設計がキャンバスに描かれます。代わりに指示をコピーして Claude Code などの AI エージェントに渡すこともできます。返ってきたリンクを開くか、JSON をファイルに保存して「プロジェクトを開く」から読み込みます。",
+    en: "Describe what you want and press Draft with AI: the model from the AI tab draws the design on the canvas. Or copy the instruction for an AI agent such as Claude Code; open the link it replies with, or save its JSON and load it with Open project.",
+    zh: "写下想做的东西并按“让 AI 生成”，AI 标签页里的模型会把设计画到画布上。也可以复制指令交给 Claude Code 等 AI 代理：打开它回复的链接，或把 JSON 保存为文件后用“打开项目”读取。",
+  },
+  askAiIdea: { ja: "作りたいもの（例: レシピを保存して検索できるアプリ）", en: "What to build (e.g. an app to save and search recipes)", zh: "想做的东西（例如：能保存和搜索菜谱的应用）" },
+  askAiIdeaFallback: { ja: "（ここに作りたいものを書く）", en: "(describe what to build here)", zh: "（在这里写下想做的东西）" },
+  askAiCopy: { ja: "指示をコピー", en: "Copy the instruction", zh: "复制指令" },
+  askAiText: {
+    ja: "M3E Canvas のスケッチを作ってください。まず {url} を読み、その手順どおりに設計を JSON で組み立てて、共有リンクの形で返してください。コードを実行できない場合は、設計の JSON をコードブロックで返してください（ファイルに保存して読み込みます）。検証は不要です。\n\n作りたいもの: {idea}",
+    en: "Make an M3E Canvas sketch. First read {url} and follow it: build the design as JSON and reply with a share link. If you cannot run code, reply with the JSON in a code block (it will be saved to a file and opened). No verification is needed.\n\nWhat to build: {idea}",
+    zh: "请制作一个 M3E Canvas 草图。先阅读 {url}，按其中的步骤用 JSON 组织设计，并以分享链接的形式回复。如果无法运行代码，就在代码块中回复设计的 JSON（会保存为文件后打开）。不需要验证。\n\n想做的东西：{idea}",
+  },
+  askAiGenerate: { ja: "AI で作る", en: "Draft with AI", zh: "让 AI 生成" },
+  askAiPasted: { ja: "AI エージェントに貼り付けてください", en: "Paste it into your AI agent", zh: "请粘贴到 AI 代理中" },
+  askAiTitle: { ja: "AI に設計を頼む", en: "Ask an AI for a design", zh: "让 AI 设计" },
+  askAiCopyTitle: { ja: "AI エージェント用の指示", en: "Instruction for an AI agent", zh: "AI 代理用指令" },
+  askAiGenerateTitle: { ja: "AI タブのキーで作る", en: "Uses the key in the AI tab", zh: "使用 AI 标签页的密钥" },
+  aiSetup: { ja: "AI の設定", en: "AI settings", zh: "AI 设置" },
+  aiSetupHint: { ja: "キーを入れると、ここで直接作れます", en: "Add a key to draft it right here", zh: "填写密钥后可在此直接生成" },
+  aiSetupTitle: { ja: "AI タブを開く", en: "Open the AI tab", zh: "打开 AI 标签页" },
+  draftKeep: { ja: "この設計を採用", en: "Keep this design", zh: "采用这个设计" },
+  draftUndo: { ja: "前の設計に戻す", en: "Back to the previous design", zh: "恢复之前的设计" },
+  askAiGenerating: { ja: "作成中…", en: "Drafting…", zh: "生成中…" },
+  selectedTab: { ja: "選択中にする", en: "Make this the selected one", zh: "设为选中项" },
+  shareLinkCopy: { ja: "リンクをコピー", en: "Copy link", zh: "复制链接" },
+  shareLinkHint: { ja: "この設計を開くリンク（画像は含まない）", en: "A link that opens this design (no images)", zh: "打开此设计的链接（不含图片）" },
   replaceProject: {
-    ja: "現在のキャンバスは置き換えられ、元に戻す (Ctrl+Z) では戻れません。先に保存しておくと安全です。",
-    en: "The current canvas will be replaced, and undo (Ctrl+Z) cannot bring it back. Save it first to be safe.",
-    zh: "当前画布将被替换，且无法用撤销 (Ctrl+Z) 恢复。建议先保存。",
+    ja: "現在のキャンバスは置き換わります。元に戻す (Ctrl+Z) で戻せます。",
+    en: "The current canvas will be replaced. Undo (Ctrl+Z) brings it back.",
+    zh: "当前画布将被替换。可以用撤销 (Ctrl+Z) 恢复。",
   },
   invalidProject: {
     ja: "プロジェクトファイルを開けませんでした。",
     en: "Could not open the project file.",
     zh: "无法打开项目文件。",
   },
+  readOnlyTitle: { ja: "別のタブで編集中です", en: "Editing in another tab", zh: "正在其他标签页中编辑" },
+  readOnlyBody: {
+    ja: "このキャンバスは別のタブで編集中です。そのタブを閉じてから、このページを再読み込みしてください。",
+    en: "This canvas is being edited in another tab. Close that tab, then reload this page to edit.",
+    zh: "此画布正在其他标签页中编辑。关闭该标签页后，重新加载此页面即可编辑。",
+  },
+  reload: { ja: "再読み込み", en: "Reload", zh: "重新加载" },
   copied: { ja: "コピーしました", en: "Copied", zh: "已复制" },
   saveImage: { ja: "画像で保存", en: "Save as image", zh: "保存为图片" },
   saving: { ja: "保存中…", en: "Saving…", zh: "保存中…" },
@@ -89,17 +168,31 @@ const UI = {
   action: { ja: "アクション", en: "Action", zh: "操作" },
   supporting: { ja: "サブテキスト", en: "Supporting text", zh: "辅助文本" },
   tabs: { ja: "項目", en: "Items", zh: "项目" },
+  options: { ja: "選択肢", en: "Options", zh: "选项" },
+  addOption: { ja: "選択肢を追加", en: "Add an option", zh: "添加选项" },
+  removeOption: { ja: "この選択肢を削除", en: "Remove this option", zh: "删除此选项" },
+  selectedOption: { ja: "初期値にする（もう一度押すと未選択）", en: "Make this the initial value (press again for none)", zh: "设为初始值（再按一次取消）" },
   changeIcon: { ja: "アイコンを変更", en: "Change icon", zh: "更改图标" },
   image: { ja: "画像", en: "Image", zh: "图片" },
   pickImage: { ja: "画像を選ぶ", en: "Choose image", zh: "选择图片" },
   removeImage: { ja: "画像を外す", en: "Remove image", zh: "移除图片" },
+  imageUrl: { ja: "画像の URL", en: "Image URL", zh: "图片网址" },
+  imageArea: { ja: "画像エリア", en: "Image area", zh: "图片区域" },
+  autoWidth: { ja: "文字の幅", en: "Text width", zh: "随文字" },
   icon: { ja: "アイコン", en: "Icon", zh: "图标" },
   noIcon: { ja: "アイコンなし", en: "No icon", zh: "无图标" },
   searchIcons: { ja: "アイコンを検索", en: "Search icons", zh: "搜索图标" },
   style: { ja: "スタイル", en: "Style", zh: "样式" },
+  filled: { ja: "塗りつぶし", en: "Filled", zh: "填充" },
+  tonal: { ja: "トーナル", en: "Tonal", zh: "色调" },
+  elevated: { ja: "浮き上がり", en: "Elevated", zh: "凸起" },
+  outlined: { ja: "枠線", en: "Outlined", zh: "描边" },
+  standard: { ja: "標準", en: "Standard", zh: "标准" },
+  vibrant: { ja: "鮮やか", en: "Vibrant", zh: "鲜艳" },
   state: { ja: "状態", en: "State", zh: "状态" },
   selected: { ja: "選択", en: "Selected", zh: "已选中" },
   handle: { ja: "ハンドル（ボトムシート）", en: "Handle (bottom sheet)", zh: "拖动条（底部面板）" },
+  listSwitch: { ja: "末尾にスイッチ", en: "Trailing switch", zh: "末尾开关" },
   on: { ja: "オン", en: "On", zh: "开" },
   container: { ja: "コンテナ", en: "Container", zh: "容器" },
   wavy: { ja: "波形", en: "Wavy", zh: "波浪形" },
@@ -111,9 +204,17 @@ const UI = {
   cornerRadius: { ja: "角丸", en: "Corner radius", zh: "圆角" },
   cornerTop: { ja: "上の角丸", en: "Top corners", zh: "上方圆角" },
   cornerBottom: { ja: "下の角丸", en: "Bottom corners", zh: "下方圆角" },
+  cornerLeft: { ja: "左の角丸", en: "Left corners", zh: "左侧圆角" },
+  cornerRight: { ja: "右の角丸", en: "Right corners", zh: "右侧圆角" },
+  cornersEach: { ja: "角ごとに指定", en: "Each corner", zh: "分别设置各角" },
+  cornerTl: { ja: "左上", en: "Top left", zh: "左上" },
+  cornerTr: { ja: "右上", en: "Top right", zh: "右上" },
+  cornerBl: { ja: "左下", en: "Bottom left", zh: "左下" },
+  cornerBr: { ja: "右下", en: "Bottom right", zh: "右下" },
   screenWidth: { ja: "画面いっぱい", en: "Screen width", zh: "全屏宽" },
   contentWidth: { ja: "左右 16dp の余白", en: "16dp side margins", zh: "左右 16dp 边距" },
   halfWidth: { ja: "2 列に並べる幅", en: "Half a row (two columns)", zh: "两列宽" },
+  columnWidth: { ja: "スマホ 1 画面分の幅", en: "One phone column", zh: "一个手机屏幕的宽度" },
   screenHeight: { ja: "画面の高さ", en: "Screen height", zh: "全屏高" },
   halfHeight: { ja: "画面の半分", en: "Half the screen", zh: "半屏高" },
   tapTo: { ja: "タップで移動", en: "Tap to open", zh: "点击跳转" },
@@ -168,9 +269,9 @@ const UI = {
   closeBtn: { ja: "閉じる", en: "Close", zh: "关闭" },
   screens: { ja: "画面を選ぶ", en: "Choose screen", zh: "选择屏幕" },
   // layers
-  layerUp: { ja: "前面へ", en: "Bring forward", zh: "上移一层" },
-  layerDown: { ja: "背面へ", en: "Send backward", zh: "下移一层" },
   noLayers: { ja: "この画面には部品がありません", en: "Nothing on this screen yet", zh: "此屏幕还没有组件" },
+  showParts: { ja: "中の部品を表示", en: "Show the parts inside", zh: "显示组内组件" },
+  hideParts: { ja: "中の部品を隠す", en: "Hide the parts inside", zh: "隐藏组内组件" },
   // prompt panel
   brief: { ja: "このアプリの説明…", en: "What this app is…", zh: "这个应用的说明…" },
   appName: { ja: "アプリの名前", en: "App name", zh: "应用名称" },
@@ -240,6 +341,23 @@ const UI = {
   tidy: { ja: "整える", en: "Tidy", zh: "整理" },
   tidyUndo: { ja: "整える前に戻す", en: "Undo tidy", zh: "撤销整理" },
   tidyDone: { ja: "すでに整っています", en: "Already tidy", zh: "已经整齐" },
+  placement: { ja: "本文の縦の配置", en: "Where the body goes", zh: "正文的纵向位置" },
+  placeTop: { ja: "上から", en: "From the top", zh: "从顶部开始" },
+  placeCenter: { ja: "中央", en: "Centered", zh: "居中" },
+  placeBottom: { ja: "下寄せ", en: "At the bottom", zh: "靠底部" },
+  placeSpread: { ja: "均等", en: "Spread out", zh: "均匀分布" },
+  // alignment of a selection
+  align: { ja: "整列", en: "Align", zh: "对齐" },
+  alignHintOne: { ja: "画面の本文領域（バーとレールを除いた余白の内側）に揃えます。", en: "Lines the part up with the screen's body, inside the margins and clear of the bars.", zh: "与屏幕正文区域（栏和导轨以外、边距以内）对齐。" },
+  alignHintMany: { ja: "選択した部品同士で揃えます。均等配置は両端を固定して間を等間隔にします。", en: "Lines the selected parts up with each other. Spacing evenly keeps the two outer parts in place.", zh: "选中的组件之间互相对齐。等距分布会固定两端组件。" },
+  alignLeft: { ja: "左揃え", en: "Align left", zh: "左对齐" },
+  alignCenterH: { ja: "左右中央揃え", en: "Center horizontally", zh: "水平居中" },
+  alignRight: { ja: "右揃え", en: "Align right", zh: "右对齐" },
+  distributeH: { ja: "横に均等配置", en: "Distribute horizontally", zh: "水平等距分布" },
+  alignTop: { ja: "上揃え", en: "Align top", zh: "顶对齐" },
+  alignCenterV: { ja: "上下中央揃え", en: "Center vertically", zh: "垂直居中" },
+  alignBottom: { ja: "下揃え", en: "Align bottom", zh: "底对齐" },
+  distributeV: { ja: "縦に均等配置", en: "Distribute vertically", zh: "垂直等距分布" },
   // screen description
   description: { ja: "説明", en: "Description", zh: "说明" },
   screenDescription: { ja: "この画面の目的", en: "What this screen is for", zh: "这个屏幕的用途" },
@@ -266,6 +384,7 @@ const UI = {
   aiError: { ja: "AI の呼び出しに失敗しました", en: "The AI request failed", zh: "AI 请求失败" },
   aiErrorRefusal: { ja: "モデルが回答を拒否しました", en: "The model declined to answer", zh: "模型拒绝回答" },
   aiErrorJson: { ja: "モデルの返答を読み取れませんでした", en: "The model's reply could not be read", zh: "无法解析模型的回复" },
+  aiErrorLong: { ja: "返答が長すぎて途中で切れました。画面を減らして試してください", en: "The reply was cut short. Try fewer screens", zh: "回复过长被截断了。请减少屏幕数量再试" },
   aiErrorModel: { ja: "モデル ID を入力してください", en: "Enter a model ID", zh: "请输入模型 ID" },
   aiErrorInsecure: { ja: "ベース URL は https か localhost にしてください", en: "The base URL must use https or point at localhost", zh: "基础 URL 必须使用 https 或指向 localhost" },
   aiErrorNetwork: {
@@ -277,7 +396,66 @@ const UI = {
 
 export type UIKey = keyof typeof UI;
 
-export const t = (key: UIKey, lang: Lang = current): string => UI[key][lang];
+/** exported for the parity tests only; read strings through t() */
+export const KO: Record<UIKey, string> = {
+  frameSize: "화면 크기", phoneFrame: "휴대전화", desktopFrame: "데스크톱", columnWidth: "휴대전화 한 화면 너비", cornerLeft: "왼쪽 모서리", cornerRight: "오른쪽 모서리", cornersEach: "모서리별로 지정", cornerTl: "왼쪽 위", cornerTr: "오른쪽 위", cornerBl: "왼쪽 아래", cornerBr: "오른쪽 아래",
+  filled: "채움", tonal: "색조", elevated: "그림자", outlined: "윤곽선", standard: "표준", vibrant: "선명함",
+  parts: "부품", layers: "레이어", edit: "편집", prompt: "프롬프트", closePanel: "패널 닫기",
+  search: "검색", favorites: "즐겨찾기", addFavorite: "즐겨찾기에 추가", removeFavorite: "즐겨찾기에서 제거", clear: "지우기", language: "언어",
+  select: "선택 (V)", hand: "손 도구 (H / Space)", blank: "빈 캔버스", phone: "휴대전화 화면", addFrame: "화면 추가", preview: "미리보기 (P)",
+  zoomIn: "확대 (+)", zoomOut: "축소 (-)", fit: "전체 맞춤 (0)", undo: "실행 취소 (Ctrl+Z)", redo: "다시 실행 (Ctrl+Shift+Z)",
+  clearAll: "모두 지우기", clearAllTitle: "캔버스를 비울까요?", clearAllBody: "모든 화면과 부품을 삭제합니다. 실행 취소(Ctrl+Z)로 복원할 수 있습니다.",
+  screen: "화면", screenName: "화면 이름", name: "이름", background: "배경", export: "내보내기", project: "프로젝트",
+  saveProject: "프로젝트 저장", openProject: "프로젝트 열기", replaceProjectTitle: "이 프로젝트를 열까요?",
+  replaceProject: "현재 캔버스가 교체됩니다. 실행 취소(Ctrl+Z)로 되돌릴 수 있습니다.",
+  askAi: "AI에게 맡기기",
+  askAiHint: "만들고 싶은 것을 적고 'AI로 만들기'를 누르면 AI 탭의 키로 설계가 캔버스에 그려집니다. 대신 지시를 복사해 Claude Code 같은 AI 에이전트에 넘길 수도 있습니다. 답한 링크를 열거나 JSON을 파일로 저장해 '프로젝트 열기'로 불러오세요.",
+  askAiGenerate: "AI로 만들기", askAiGenerating: "만드는 중…",
+  askAiPasted: "AI 에이전트에 붙여 넣으세요", askAiTitle: "AI에게 설계 맡기기", askAiCopyTitle: "AI 에이전트용 지시", askAiGenerateTitle: "AI 탭의 키로 만들기", aiSetup: "AI 설정", aiSetupHint: "키를 입력하면 여기서 바로 만들 수 있습니다", aiSetupTitle: "AI 탭 열기",
+  draftKeep: "이 설계 채택", draftUndo: "이전 설계로 되돌리기",
+  askAiIdea: "만들고 싶은 것(예: 레시피를 저장하고 검색하는 앱)", askAiIdeaFallback: "(여기에 만들고 싶은 것을 적으세요)", askAiCopy: "지시 복사",
+  askAiText: "M3E Canvas 스케치를 만들어 주세요. 먼저 {url}을 읽고 그 절차대로 설계를 JSON으로 구성한 뒤, 공유 링크 형태로 답해 주세요. 코드를 실행할 수 없다면 설계 JSON을 코드 블록으로 답해 주세요(파일로 저장해 불러옵니다). 검증은 필요 없습니다.\n\n만들고 싶은 것: {idea}",
+  selectedTab: "선택 항목으로 지정",
+  shareLinkCopy: "링크 복사", shareLinkHint: "이 설계를 여는 링크(이미지 제외)",
+  invalidProject: "프로젝트 파일을 열 수 없습니다.", readOnlyTitle: "다른 탭에서 편집 중입니다",
+  readOnlyBody: "이 캔버스는 다른 탭에서 편집 중입니다. 해당 탭을 닫은 다음 이 페이지를 새로고침하세요.",
+  reload: "새로고침",
+  copied: "복사됨", saveImage: "이미지로 저장", saving: "저장 중…", previewFrom: "이 화면부터 미리보기",
+  duplicate: "복제", duplicateKey: "복제 (Ctrl+D)", delete: "삭제 (Delete)", deleteSelection: "선택 항목 삭제",
+  text: "텍스트", label: "레이블", bold: "굵게", action: "동작", supporting: "보조 텍스트", tabs: "항목", changeIcon: "아이콘 변경",
+  options: "옵션", addOption: "옵션 추가", removeOption: "이 옵션 삭제", selectedOption: "초깃값으로 설정(다시 누르면 선택 해제)", image: "이미지", pickImage: "이미지 선택", removeImage: "이미지 제거", imageUrl: "이미지 URL", imageArea: "이미지 영역", autoWidth: "글자 너비", icon: "아이콘", noIcon: "아이콘 없음", searchIcons: "아이콘 검색",
+  style: "스타일", state: "상태", selected: "선택됨", handle: "핸들(하단 시트)", listSwitch: "끝에 스위치", on: "켜짐", container: "컨테이너", wavy: "물결 모양", determinate: "확정형",
+  size: "크기", width: "너비", height: "높이", fontSize: "글자 크기", cornerRadius: "모서리 둥글기", cornerTop: "위쪽 모서리", cornerBottom: "아래쪽 모서리",
+  screenWidth: "화면 너비", contentWidth: "좌우 16dp 여백", halfWidth: "한 행의 절반(2열)", screenHeight: "화면 높이", halfHeight: "화면의 절반",
+  tapTo: "탭하여 이동", none: "없음", goBack: "뒤로", swipeTo: "스와이프하여 이동", toggle: "토글 버튼", toggleHint: "탭할 때 켜짐/꺼짐 전환",
+  thumbCheck: "켜졌을 때 체크 아이콘 표시", behavior: "동작", whenPressed: "눌렀을 때…", whatItDoes: "이 부품의 동작…", removeLink: "링크 제거",
+  group: "그룹", makeGroup: "그룹화", ungroup: "그룹 해제", selectedParts: "개 선택됨", groupHint: "겹침을 유지한 채 하나의 레이어처럼 함께 이동합니다",
+  iconBackground: "아이콘 배경", noBackground: "배경 없음", normalState: "기본", onState: "켜짐", onStateHint: "켜졌을 때의 텍스트, 아이콘, 스타일",
+  groupEditNote: "안쪽 부품을 편집하려면 그룹을 해제하세요", openPanel: "패널 열기", colors: "색상", templates: "팔레트", customColor: "사용자 지정",
+  seedColor: "기준 색상", seedHint: "색상 하나로 전체 Material 3 색상 구성을 만듭니다. 세부 조정에서 개별 색상도 바꿀 수 있습니다.",
+  useThis: "이 색상 사용", fineTune: "세부 조정", dynamicColor: "동적 색상",
+  dynamicOnHint: "여기 표시된 색상은 편집기 전용입니다. 실제 기기에서는 배경화면 색상을 사용합니다.",
+  dynamicOffHint: "켜면 실제 기기는 배경화면 색상을 사용하고 여기의 색상은 대체 색상이 됩니다.", closeBtn: "닫기", screens: "화면 선택",
+  noLayers: "이 화면에는 아직 부품이 없습니다", showParts: "안의 부품 표시", hideParts: "안의 부품 숨기기",
+  brief: "이 앱에 대한 설명…", appName: "앱 이름", targetPlatform: "구현 대상", targetAndroid: "Android 네이티브 앱으로 만들기",
+  targetWeb: "브라우저에서 실행되는 웹 앱으로 만들기", copyPrompt: "프롬프트 복사", back: "뒤로", close: "닫기 (Esc)", cancel: "취소", ok: "확인",
+  leading: "앞쪽", trailing: "뒤쪽", home: "홈", screenN: "화면", copySuffix: " 복사본", mobileNote: "전체 기능은 데스크톱 브라우저에서 사용할 수 있습니다",
+  addButton: "버튼 추가", done: "완료", theme: "테마", settings: "테마 및 설정", shape: "모양", typography: "글꼴", motion: "모션",
+  brightness: "밝기", light: "라이트", dark: "다크", contrast: "대비", bothModes: "둘 다", contrastStandard: "표준", contrastMedium: "중간", contrastHigh: "높음",
+  shapeScale: "모서리 둥글기", shapeSquare: "사각형", shapeRounded: "둥근형", shapeFull: "완전 둥근형",
+  shapeHint: "모든 부품의 기본 모서리를 한 번에 바꿉니다. 부품에 직접 입력한 반경은 유지됩니다.", fontFamily: "글꼴", emphasized: "강조 스타일",
+  emphasizedHint: "제목과 레이블에 더 굵은 M3 Expressive 스타일을 사용합니다.", motionScheme: "모션 방식", motionStandard: "표준", motionExpressive: "익스프레시브",
+  motionHint: "익스프레시브는 통통 튀는 스프링 효과입니다. 미리보기 화면 전환과 프롬프트에 반영됩니다.", tryIt: "탭하여 확인",
+  tidy: "정리", tidyUndo: "정리 실행 취소", tidyDone: "이미 정돈되어 있습니다", placement: "본문의 세로 배치", placeTop: "위에서부터", placeCenter: "가운데", placeBottom: "아래쪽", placeSpread: "균등", align: "정렬", alignHintOne: "화면 본문 영역(바와 레일을 제외한 여백 안쪽)에 맞춰 정렬합니다.", alignHintMany: "선택한 부품끼리 정렬합니다. 균등 배치는 양끝 부품을 고정합니다.", alignLeft: "왼쪽 정렬", alignCenterH: "가로 가운데 정렬", alignRight: "오른쪽 정렬", distributeH: "가로 균등 배치", alignTop: "위쪽 정렬", alignCenterV: "세로 가운데 정렬", alignBottom: "아래쪽 정렬", distributeV: "세로 균등 배치", description: "설명", screenDescription: "이 화면의 용도",
+  ai: "AI", promptReset: "생성된 프롬프트로 되돌리기", aiWriteShort: "AI로 작성", aiWrite: "AI에게 작성 맡기기", aiSettings: "AI 설정",
+  aiProvider: "제공업체", aiBaseUrl: "기본 URL", aiModel: "모델 ID", aiKey: "API 키", aiGetKey: "키 받기",
+  aiKeyHint: "키는 이 브라우저에만 저장되며 제공업체로 직접 전송됩니다.", aiRestore: "AI 수정본과 원본 전환", aiApplied: "적용됨",
+  aiSelectScreen: "먼저 화면을 선택하세요", aiNoKey: "AI 탭에 키를 입력하면 사용할 수 있습니다", aiError: "AI 요청에 실패했습니다",
+  aiErrorRefusal: "모델이 답변을 거부했습니다", aiErrorJson: "모델의 응답을 읽을 수 없습니다", aiErrorLong: "답변이 너무 길어 중간에 잘렸습니다. 화면 수를 줄여 다시 시도하세요", aiErrorModel: "모델 ID를 입력하세요",
+  aiErrorInsecure: "기본 URL은 https를 사용하거나 localhost를 가리켜야 합니다", aiErrorNetwork: "연결할 수 없습니다. URL, 네트워크 및 서버의 CORS 설정을 확인하세요",
+};
+
+export const t = (key: UIKey, lang: Lang = current): string => (lang === "ko" ? KO[key] : UI[key][lang]);
 
 /* ---- part defaults and nouns ---- */
 
@@ -294,17 +472,21 @@ export const KIND_TEXT: Record<
     chip: { noun: "チップ", label: "チップ" },
     topAppBar: { noun: "トップアプリバー", label: "タイトル" },
     bottomNav: { noun: "ナビゲーションバー" },
+    navRail: { noun: "ナビゲーションレール" },
     searchBar: { noun: "検索バー", label: "検索" },
     card: { noun: "カード", label: "カードの見出し", supporting: "補足テキストがここに入ります。" },
     listItem: { noun: "リスト項目", label: "リスト項目", supporting: "サブテキスト" },
     dialog: { noun: "ダイアログ", label: "確認", supporting: "この操作を実行しますか？" },
     snackbar: { noun: "スナックバー", label: "保存しました", supporting: "元に戻す" },
     textField: { noun: "テキスト入力", label: "ラベル" },
+    select: { noun: "ドロップダウン", label: "ラベル" },
     switch: { noun: "スイッチ", label: "通知" },
     checkbox: { noun: "チェックボックス", label: "同意する" },
     slider: { noun: "スライダー" },
     text: { noun: "テキスト", label: "見出し" },
     image: { noun: "画像" },
+    camera: { noun: "カメラ" },
+    map: { noun: "地図" },
     divider: { noun: "区切り線" },
     loadingIndicator: { noun: "ローディングインジケータ" },
     linearProgress: { noun: "リニアプログレス" },
@@ -325,17 +507,21 @@ export const KIND_TEXT: Record<
     chip: { noun: "chip", label: "Chip" },
     topAppBar: { noun: "top app bar", label: "Title" },
     bottomNav: { noun: "navigation bar" },
+    navRail: { noun: "navigation rail" },
     searchBar: { noun: "search bar", label: "Search" },
     card: { noun: "card", label: "Card headline", supporting: "Supporting text goes here." },
     listItem: { noun: "list item", label: "List item", supporting: "Supporting text" },
     dialog: { noun: "dialog", label: "Confirm", supporting: "Do you want to continue?" },
     snackbar: { noun: "snackbar", label: "Saved", supporting: "Undo" },
     textField: { noun: "text field", label: "Label" },
+    select: { noun: "dropdown", label: "Label" },
     switch: { noun: "switch", label: "Notifications" },
     checkbox: { noun: "checkbox", label: "I agree" },
     slider: { noun: "slider" },
     text: { noun: "text", label: "Headline" },
     image: { noun: "image" },
+    camera: { noun: "camera" },
+    map: { noun: "map" },
     divider: { noun: "divider" },
     loadingIndicator: { noun: "loading indicator" },
     linearProgress: { noun: "linear progress indicator" },
@@ -356,17 +542,21 @@ export const KIND_TEXT: Record<
     chip: { noun: "标签片", label: "标签" },
     topAppBar: { noun: "顶部应用栏", label: "标题" },
     bottomNav: { noun: "导航栏" },
+    navRail: { noun: "侧边导航栏" },
     searchBar: { noun: "搜索栏", label: "搜索" },
     card: { noun: "卡片", label: "卡片标题", supporting: "这里是辅助说明文字。" },
     listItem: { noun: "列表项", label: "列表项", supporting: "辅助文本" },
     dialog: { noun: "对话框", label: "确认", supporting: "要执行此操作吗？" },
     snackbar: { noun: "消息条", label: "已保存", supporting: "撤销" },
     textField: { noun: "文本输入框", label: "标签" },
+    select: { noun: "下拉菜单", label: "标签" },
     switch: { noun: "开关", label: "通知" },
     checkbox: { noun: "复选框", label: "我同意" },
     slider: { noun: "滑块" },
     text: { noun: "文本", label: "标题" },
     image: { noun: "图片" },
+    camera: { noun: "相机" },
+    map: { noun: "地图" },
     divider: { noun: "分割线" },
     loadingIndicator: { noun: "加载指示器" },
     linearProgress: { noun: "线性进度条" },
@@ -378,6 +568,41 @@ export const KIND_TEXT: Record<
     radio: { noun: "单选按钮", label: "选项" },
     badge: { noun: "徽标", label: "3" },
   },
+  ko: {
+    box: { noun: "상자" },
+    button: { noun: "버튼", label: "버튼" },
+    iconButton: { noun: "아이콘 버튼" },
+    fab: { noun: "FAB" },
+    extendedFab: { noun: "확장 FAB", label: "만들기" },
+    chip: { noun: "칩", label: "칩" },
+    topAppBar: { noun: "상단 앱 바", label: "제목" },
+    bottomNav: { noun: "내비게이션 바" },
+    navRail: { noun: "내비게이션 레일" },
+    searchBar: { noun: "검색창", label: "검색" },
+    card: { noun: "카드", label: "카드 제목", supporting: "보조 텍스트가 여기에 표시됩니다." },
+    listItem: { noun: "목록 항목", label: "목록 항목", supporting: "보조 텍스트" },
+    dialog: { noun: "대화상자", label: "확인", supporting: "계속하시겠습니까?" },
+    snackbar: { noun: "스낵바", label: "저장됨", supporting: "실행 취소" },
+    textField: { noun: "텍스트 입력란", label: "레이블" },
+    select: { noun: "드롭다운", label: "레이블" },
+    switch: { noun: "스위치", label: "알림" },
+    checkbox: { noun: "체크박스", label: "동의합니다" },
+    slider: { noun: "슬라이더" },
+    text: { noun: "텍스트", label: "제목" },
+    image: { noun: "이미지" },
+    camera: { noun: "카메라" },
+    map: { noun: "지도" },
+    divider: { noun: "구분선" },
+    loadingIndicator: { noun: "로딩 표시기" },
+    linearProgress: { noun: "선형 진행 표시기" },
+    circularProgress: { noun: "원형 진행 표시기" },
+    splitButton: { noun: "분할 버튼", label: "보내기" },
+    fabMenu: { noun: "FAB 메뉴" },
+    toolbar: { noun: "도구 모음" },
+    tabs: { noun: "탭" },
+    radio: { noun: "라디오 버튼", label: "옵션" },
+    badge: { noun: "배지", label: "3" },
+  },
 };
 
 /** default labels of a tab row */
@@ -385,9 +610,18 @@ export const TAB_LABELS: Record<Lang, string[]> = {
   ja: ["おすすめ", "フォロー中", "人気", "新着", "保存済み"],
   en: ["For you", "Following", "Trending", "New", "Saved"],
   zh: ["推荐", "关注", "热门", "最新", "已保存"],
+  ko: ["추천", "팔로잉", "인기", "새 항목", "저장됨"],
 };
 
 /** default entries of a FAB menu */
+/** the options a new dropdown starts with */
+export const SELECT_OPTIONS: Record<Lang, string[]> = {
+  ja: ["選択肢 1", "選択肢 2", "選択肢 3"],
+  en: ["Option 1", "Option 2", "Option 3"],
+  zh: ["选项 1", "选项 2", "选项 3"],
+  ko: ["옵션 1", "옵션 2", "옵션 3"],
+};
+
 export const FAB_MENU_TABS: Record<Lang, { icon: string; label: string }[]> = {
   ja: [
     { icon: "edit", label: "メモ" },
@@ -410,6 +644,13 @@ export const FAB_MENU_TABS: Record<Lang, { icon: string; label: string }[]> = {
     { icon: "attach_file", label: "文件" },
     { icon: "event", label: "日程" },
   ],
+  ko: [
+    { icon: "edit", label: "메모" },
+    { icon: "photo_camera", label: "사진" },
+    { icon: "mic", label: "오디오" },
+    { icon: "attach_file", label: "파일" },
+    { icon: "event", label: "일정" },
+  ],
 };
 
 export const NAV_TABS: Record<Lang, { icon: string; label: string }[]> = {
@@ -430,6 +671,12 @@ export const NAV_TABS: Record<Lang, { icon: string; label: string }[]> = {
     { icon: "search", label: "搜索" },
     { icon: "favorite", label: "收藏" },
     { icon: "settings", label: "设置" },
+  ],
+  ko: [
+    { icon: "home", label: "홈" },
+    { icon: "search", label: "검색" },
+    { icon: "favorite", label: "저장됨" },
+    { icon: "settings", label: "설정" },
   ],
 };
 
@@ -461,10 +708,20 @@ export const TRANSITION_TEXT: Record<Lang, Record<string, string>> = {
     expand: "放大",
     none: "无动画",
   },
+  ko: {
+    slide: "오른쪽에서 슬라이드",
+    slideLeft: "왼쪽에서 슬라이드",
+    slideUp: "아래에서 슬라이드",
+    slideDown: "위에서 슬라이드",
+    fade: "페이드",
+    expand: "확대",
+    none: "애니메이션 없음",
+  },
 };
 
 export const SWIPE_TEXT: Record<Lang, Record<string, string>> = {
   ja: { left: "左へスワイプ", right: "右へスワイプ", up: "上へスワイプ", down: "下へスワイプ" },
   en: { left: "swiping left", right: "swiping right", up: "swiping up", down: "swiping down" },
   zh: { left: "向左滑动", right: "向右滑动", up: "向上滑动", down: "向下滑动" },
+  ko: { left: "왼쪽으로 스와이프", right: "오른쪽으로 스와이프", up: "위로 스와이프", down: "아래로 스와이프" },
 };

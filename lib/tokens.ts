@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { FAB_MENU_TABS, KIND_TEXT, Lang, NAV_TABS, TAB_LABELS, getLang, t } from "./i18n";
+import { FAB_MENU_TABS, KIND_TEXT, Lang, NAV_TABS, TAB_LABELS, getLang, t, SELECT_OPTIONS } from "./i18n";
 import { Contrast, schemeFromSeed } from "./color";
 
 /* ---------- geometry ---------- */
@@ -24,6 +24,14 @@ export const PHONE_R = 40;
 export const DESKTOP_W = 1280;
 export const DESKTOP_H = 800;
 export const DESKTOP_R = 28;
+/** M3 window size classes: a screen this wide is "expanded", where the navigation bar becomes a rail */
+export const EXPANDED_W = 840;
+export const isExpanded = (w: number) => w >= EXPANDED_W;
+/** navigation rail: width, top inset and the pitch of one destination (56×32 indicator, label, gap) */
+export const RAIL_W = 80;
+export const RAIL_TOP = 44;
+export const RAIL_ITEM_H = 52;
+export const RAIL_GAP = 12;
 /** system insets: the status bar above a top app bar and the gesture area below a navigation bar.
  *  Both bars carry their inset as extra height so their background reaches the rounded screen edge. */
 export const STATUS_BAR_H = 24;
@@ -318,7 +326,32 @@ export const FONTS: { key: FontKey; label: string; family: string; /** Google Fo
   { key: "system", label: "System", family: "system-ui, -apple-system, 'Segoe UI', sans-serif" },
 ];
 
-export const fontFamilyOf = (f: FontKey) => FONTS.find((x) => x.key === f)?.family ?? FONTS[0].family;
+/** The Noto Sans face that covers a language's script, spliced in behind the chosen
+ *  face so CJK text renders the same on every OS. English needs none. */
+export const LANG_FONT: Record<Lang, { family: string; google: string } | null> = {
+  ja: { family: "'Noto Sans JP'", google: "Noto+Sans+JP:wght@400;500;600;700" },
+  zh: { family: "'Noto Sans SC'", google: "Noto+Sans+SC:wght@400;500;600;700" },
+  ko: { family: "'Noto Sans KR'", google: "Noto+Sans+KR:wght@400;500;600;700" },
+  en: null,
+};
+
+/** a family list with the language's Noto face placed before the generic fallbacks */
+const withLangFont = (family: string, lang?: Lang) => {
+  const extra = lang ? LANG_FONT[lang]?.family : undefined;
+  if (!extra) return family;
+  const parts = family.split(",").map((s) => s.trim());
+  const at = parts.findIndex((s) => /^(system-ui|-apple-system|Georgia|serif|sans-serif)$/.test(s));
+  parts.splice(at < 0 ? parts.length : at, 0, extra);
+  return parts.join(", ");
+};
+
+/** the chosen face, with the language's Noto face behind it; the system font is left to the device */
+export const fontFamilyOf = (f: FontKey, lang?: Lang) => {
+  const family = FONTS.find((x) => x.key === f)?.family ?? FONTS[0].family;
+  return f === "system" ? family : withLangFont(family, lang);
+};
+/** the editor's own font: Roboto, then the language's Noto face */
+export const uiFontFamily = (lang?: Lang) => withLangFont("Roboto, system-ui, sans-serif", lang);
 
 export const CONTRASTS: { key: Contrast; label: string }[] = [
   { key: "standard", label: "Standard" },
@@ -392,17 +425,21 @@ export type Kind =
   | "chip"
   | "topAppBar"
   | "bottomNav"
+  | "navRail"
   | "searchBar"
   | "card"
   | "listItem"
   | "dialog"
   | "snackbar"
   | "textField"
+  | "select"
   | "switch"
   | "checkbox"
   | "slider"
   | "text"
   | "image"
+  | "camera"
+  | "map"
   | "divider"
   | "loadingIndicator"
   | "linearProgress"
@@ -491,7 +528,7 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
     noun: "ボタン",
     category: "actions",
     paletteIcon: "buttons_alt",
-    w: 0,
+    w: 128,
     h: H,
     radius: R_FULL,
     hasVariant: true,
@@ -499,6 +536,7 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
     hasSupporting: false,
     hasIcon: true,
     connect: { axis: "x", outer: R_FULL, inner: R_INNER, family: "button" },
+    size: { min: 64, max: PHONE_W, step: 4, icon: "width", presets: [HALF_W, CONTENT_W] },
     defLabel: "ボタン",
     defIcon: "add",
   },
@@ -609,6 +647,23 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
     defIcon: null,
     defSize: PHONE_W,
   },
+  navRail: {
+    label: "Navigation Rail",
+    noun: "ナビゲーションレール",
+    category: "navigation",
+    paletteIcon: "side_navigation",
+    w: RAIL_W,
+    h: PHONE_H,
+    radius: 0,
+    hasVariant: false,
+    hasLabel: false,
+    hasSupporting: false,
+    hasIcon: false,
+    hasTabs: true,
+    size2: { min: 200, max: PHONE_H, step: 4, icon: "height", presets: HEIGHT_PRESETS },
+    defLabel: "",
+    defIcon: null,
+  },
   searchBar: {
     label: "Search Bar",
     noun: "検索バー",
@@ -633,13 +688,15 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
     category: "containment",
     paletteIcon: "web_asset",
     w: CONTENT_W,
-    h: 188,
+    h: 223,
     radius: 20,
     hasVariant: true,
     hasLabel: true,
     hasSupporting: true,
     hasIcon: true,
     size: { min: 160, max: PHONE_W, step: 4, icon: "width", presets: WIDTH_PRESETS },
+    size2: { min: 96, max: PHONE_H, step: 4, icon: "height", presets: [120, 188, 280] },
+    hasFill: true,
     defLabel: "カードの見出し",
     defIcon: "image",
     defSupporting: "補足テキストがここに入ります。",
@@ -718,19 +775,40 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
     defSize: CONTENT_W,
     defVariant: "outlined",
   },
+  select: {
+    label: "Dropdown",
+    noun: "ドロップダウン",
+    category: "inputs",
+    paletteIcon: "arrow_drop_down_circle",
+    w: CONTENT_W,
+    h: 56,
+    radius: 16,
+    hasVariant: true,
+    hasLabel: true,
+    hasSupporting: true,
+    hasIcon: true,
+    hasTabs: true,
+    size: { min: 160, max: PHONE_W, step: 4, icon: "width", presets: WIDTH_PRESETS },
+    defLabel: "ラベル",
+    defIcon: null,
+    defSupporting: "",
+    defSize: CONTENT_W,
+    defVariant: "outlined",
+  },
   switch: {
     label: "Switch",
     noun: "スイッチ",
     category: "inputs",
     paletteIcon: "toggle_on",
-    w: 0,
-    h: 32,
+    w: 160,
+    h: 48,
     radius: 16,
     hasVariant: false,
     hasLabel: true,
     hasSupporting: false,
     hasIcon: false,
     hasChecked: true,
+    size: { min: 120, max: PHONE_W, step: 4, icon: "width", presets: WIDTH_PRESETS },
     defLabel: "通知",
     defIcon: null,
   },
@@ -801,6 +879,42 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
     defLabel: "",
     defIcon: "image",
     defSize: 200,
+  },
+  camera: {
+    label: "Camera",
+    noun: "カメラ",
+    category: "content",
+    paletteIcon: "photo_camera",
+    w: CONTENT_W,
+    h: Math.round((CONTENT_W * 4) / 3),
+    radius: 20,
+    hasVariant: false,
+    hasLabel: false,
+    hasSupporting: false,
+    hasIcon: true,
+    size: { min: 96, max: PHONE_W, step: 4, icon: "width", presets: [HALF_W, CONTENT_W, PHONE_W] },
+    size2: { min: 96, max: PHONE_H, step: 4, icon: "height", presets: [280, 507, PHONE_H] },
+    defLabel: "",
+    defIcon: "photo_camera",
+    defSize: CONTENT_W,
+  },
+  map: {
+    label: "Map",
+    noun: "地図",
+    category: "content",
+    paletteIcon: "map",
+    w: CONTENT_W,
+    h: Math.round((CONTENT_W * 3) / 4),
+    radius: 20,
+    hasVariant: false,
+    hasLabel: false,
+    hasSupporting: false,
+    hasIcon: true,
+    size: { min: 96, max: PHONE_W, step: 4, icon: "width", presets: [HALF_W, CONTENT_W, PHONE_W] },
+    size2: { min: 96, max: PHONE_H, step: 4, icon: "height", presets: [200, 285, PHONE_H] },
+    defLabel: "",
+    defIcon: "map",
+    defSize: CONTENT_W,
   },
   divider: {
     label: "Divider",
@@ -978,135 +1092,6 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
   },
 };
 
-/** localized names of every kind, shown in the palette, inspector and layers */
-export const KIND_LABEL: Record<Lang, Record<Kind, string>> = {
-  ja: {
-    box: "ボックス",
-    button: "ボタン",
-    iconButton: "アイコンボタン",
-    fab: "FAB",
-    extendedFab: "拡張 FAB",
-    chip: "チップ",
-    topAppBar: "トップアプリバー",
-    bottomNav: "ナビゲーションバー",
-    searchBar: "検索バー",
-    card: "カード",
-    listItem: "リスト項目",
-    dialog: "ダイアログ",
-    snackbar: "スナックバー",
-    textField: "テキスト入力",
-    switch: "スイッチ",
-    checkbox: "チェックボックス",
-    slider: "スライダー",
-    text: "テキスト",
-    image: "画像",
-    divider: "区切り線",
-    loadingIndicator: "ローディングインジケータ",
-    linearProgress: "リニアプログレス",
-    circularProgress: "サーキュラープログレス",
-    splitButton: "スプリットボタン",
-    fabMenu: "FAB メニュー",
-    toolbar: "ツールバー",
-    tabs: "タブ",
-    radio: "ラジオボタン",
-    badge: "バッジ",
-  },
-  en: {
-    box: "Box",
-    button: "Button",
-    iconButton: "Icon Button",
-    fab: "FAB",
-    extendedFab: "Extended FAB",
-    chip: "Chip",
-    topAppBar: "Top App Bar",
-    bottomNav: "Navigation Bar",
-    searchBar: "Search Bar",
-    card: "Card",
-    listItem: "List Item",
-    dialog: "Dialog",
-    snackbar: "Snackbar",
-    textField: "Text Field",
-    switch: "Switch",
-    checkbox: "Checkbox",
-    slider: "Slider",
-    text: "Text",
-    image: "Image",
-    divider: "Divider",
-    loadingIndicator: "Loading Indicator",
-    linearProgress: "Linear Progress",
-    circularProgress: "Circular Progress",
-    splitButton: "Split Button",
-    fabMenu: "FAB Menu",
-    toolbar: "Toolbar",
-    tabs: "Tabs",
-    radio: "Radio Button",
-    badge: "Badge",
-  },
-  zh: {
-    box: "容器框",
-    button: "按钮",
-    iconButton: "图标按钮",
-    fab: "FAB",
-    extendedFab: "扩展 FAB",
-    chip: "标签片",
-    topAppBar: "顶部应用栏",
-    bottomNav: "导航栏",
-    searchBar: "搜索栏",
-    card: "卡片",
-    listItem: "列表项",
-    dialog: "对话框",
-    snackbar: "消息条",
-    textField: "文本输入框",
-    switch: "开关",
-    checkbox: "复选框",
-    slider: "滑块",
-    text: "文本",
-    image: "图片",
-    divider: "分割线",
-    loadingIndicator: "加载指示器",
-    linearProgress: "线性进度条",
-    circularProgress: "圆形进度条",
-    splitButton: "拆分按钮",
-    fabMenu: "FAB 菜单",
-    toolbar: "工具栏",
-    tabs: "标签页",
-    radio: "单选按钮",
-    badge: "徽标",
-  },
-};
-
-export const kindLabel = (kind: Kind, lang: Lang): string => KIND_LABEL[lang][kind] ?? KIND_SPEC[kind].label;
-
-/** localized names of the palette categories */
-export const CATEGORY_LABEL: Record<Lang, Record<Category, string>> = {
-  ja: {
-    actions: "操作",
-    navigation: "导航",
-    containment: "コンテナ",
-    inputs: "入力",
-    content: "コンテンツ",
-    progress: "進行状況",
-  },
-  en: {
-    actions: "Actions",
-    navigation: "Navigation",
-    containment: "Containment",
-    inputs: "Inputs",
-    content: "Content",
-    progress: "Progress",
-  },
-  zh: {
-    actions: "操作",
-    navigation: "导航",
-    containment: "容器",
-    inputs: "输入",
-    content: "内容",
-    progress: "进度",
-  },
-};
-
-export const categoryLabel = (key: Category, lang: Lang): string => CATEGORY_LABEL[lang][key];
-
 export const KIND_ORDER: Kind[] = [
   "button",
   "iconButton",
@@ -1117,6 +1102,7 @@ export const KIND_ORDER: Kind[] = [
   "chip",
   "topAppBar",
   "bottomNav",
+  "navRail",
   "toolbar",
   "tabs",
   "searchBar",
@@ -1126,12 +1112,15 @@ export const KIND_ORDER: Kind[] = [
   "dialog",
   "snackbar",
   "textField",
+  "select",
   "switch",
   "checkbox",
   "radio",
   "slider",
   "text",
   "image",
+  "camera",
+  "map",
   "badge",
   "divider",
   "loadingIndicator",
@@ -1153,7 +1142,15 @@ export type Item = {
   size?: number;
   radiusTop?: number;
   radiusBottom?: number;
+  /** boxes only: each corner on its own, when the pairs above are not enough */
+  corners?: Radii;
   tabs?: NavTab[];
+  /** navigation bars, rails and tab rows: index of the selected destination (0 when unset) */
+  selected?: number;
+  /** list items: a switch at the trailing end instead of an icon; `checked` is its state */
+  switch?: boolean;
+  /** cards: no image area at the top; `src` puts a picture in it */
+  noImage?: boolean;
   /** on/off state for switches, checkboxes and chips */
   checked?: boolean;
   /** a switch whose handle stays plain when on, without the check icon */
@@ -1224,7 +1221,7 @@ export const TRANSITIONS: { key: Transition; label: string; icon: string }[] = [
 
 /** slots on a bar that can each carry their own tap action */
 export function actionSlotsOf(it: Item): IconSlot[] {
-  if (it.kind === "topAppBar" || it.kind === "bottomNav" || it.kind === "toolbar") return iconSlotsOf(it).filter((s) => !!s.value);
+  if (it.kind === "topAppBar" || it.kind === "bottomNav" || it.kind === "navRail" || it.kind === "toolbar") return iconSlotsOf(it).filter((s) => !!s.value);
   if (it.kind === "fabMenu") return (it.tabs ?? []).map((t, i) => ({ key: `tab:${i}`, label: t.label || `${i + 1}`, value: t.icon || null }));
   if (it.kind === "tabs") return (it.tabs ?? []).map((t, i) => ({ key: `tab:${i}`, label: t.label || `${i + 1}`, value: null }));
   return [];
@@ -1278,6 +1275,9 @@ export const COLOR_TOKENS: { key: ColorToken; label: string }[] = [
 ];
 
 /** readable foreground for a chosen background token */
+/** the background a card draws when no token is set: it follows the variant */
+export const cardFillOf = (it: Item): ColorToken => it.fill ?? (it.variant === "outlined" ? "surface" : it.variant === "elevated" ? "surfaceContainerLow" : "surfaceContainerHighest");
+
 export function onToken(t: ColorToken, p: Palette): string {
   switch (t) {
     case "primary":
@@ -1310,7 +1310,22 @@ export type Frame = {
   noteHistory?: string[];
   /** frame ids reached by swiping in each direction */
   swipe?: Partial<Record<SwipeDir, string>>;
+  /** where Tidy puts the body rows between the bars: from the top unless the author says otherwise */
+  place?: Place;
 };
+
+/** how Tidy stacks the body of a screen: from the top, centered, against the bottom bar, or spread out */
+export type Place = "top" | "center" | "bottom" | "spread";
+export const PLACES: { key: Place; icon: string }[] = [
+  { key: "top", icon: "vertical_align_top" },
+  { key: "center", icon: "vertical_align_center" },
+  { key: "bottom", icon: "vertical_align_bottom" },
+  { key: "spread", icon: "expand" },
+];
+export const isPlace = (v: unknown): v is Place => v === "top" || v === "center" || v === "bottom" || v === "spread";
+
+/** how a selection of parts is lined up: an edge or centre to share, or equal gaps along an axis */
+export type AlignKind = "left" | "centerH" | "right" | "distributeH" | "top" | "centerV" | "bottom" | "distributeV";
 
 export type FramePreset = "phone" | "desktop";
 export const frameSizeOf = (f: Frame) => ({ w: f.w ?? PHONE_W, h: f.h ?? PHONE_H });
@@ -1331,6 +1346,14 @@ export const frameRadius = (f: Frame) => (isPhoneFrame(f) ? PHONE_R : DESKTOP_R)
 /** parts that span the screen edge to edge and follow its width when it changes */
 export const FULL_WIDTH: Kind[] = ["topAppBar", "bottomNav", "tabs"];
 
+/** a part no taller than the screen it is placed on: a box or a rail sized to a phone shrinks to a shorter screen */
+export function fitHeight(it: Item, screenH: number): Item {
+  const spec = KIND_SPEC[it.kind];
+  if (!spec.size2 && it.kind !== "navRail") return it;
+  const h = it.size2 ?? spec.h;
+  return h > screenH ? { ...it, size2: screenH } : it;
+}
+
 /** A part carried from one screen size to another: edge-to-edge parts take the new
  *  width, a part sized to the old content or screen width takes the new one, and a
  *  box as tall as the old screen takes the new height. A card or an image keeps its
@@ -1339,7 +1362,7 @@ export const FULL_WIDTH: Kind[] = ["topAppBar", "bottomNav", "tabs"];
 export function carryItemSize(it: Item, from: { w: number; h: number }, to: { w: number; h: number }): Item {
   const spec = KIND_SPEC[it.kind];
   const patch: Partial<Item> = {};
-  const keepsShape = it.kind === "card" || it.kind === "image";
+  const keepsShape = it.kind === "card" || it.kind === "image" || it.kind === "camera" || it.kind === "map";
   if (spec.size && (spec.size.icon === "width" || keepsShape)) {
     /* only a size that is a width; a text size or an icon button's square are left alone */
     const cur = it.size ?? spec.defSize ?? spec.w;
@@ -1354,7 +1377,12 @@ export function carryItemSize(it: Item, from: { w: number; h: number }, to: { w:
     else if (cur > to.w) patch.size = to.w;
     else if (cur > contentWidth(to.w) && it.kind !== "box") patch.size = contentWidth(to.w);
   }
-  if (it.kind === "box" && (it.size2 ?? spec.h) === from.h) patch.size2 = to.h;
+  if ((it.kind === "box" || it.kind === "navRail") && (it.size2 ?? spec.h) === from.h) patch.size2 = to.h;
+  /* a camera or map the author gave a height keeps its aspect ratio when its width changes */
+  if ((it.kind === "camera" || it.kind === "map") && it.size2 !== undefined && patch.size !== undefined) {
+    const cur = it.size ?? spec.defSize ?? spec.w;
+    patch.size2 = Math.round((it.size2 * patch.size) / cur);
+  }
   return Object.keys(patch).length ? { ...it, ...patch } : it;
 }
 
@@ -1395,10 +1423,12 @@ export function groupBounds(g: Group, widths: Record<string, number>) {
 
 /** A free group written as the runs it holds: parts of one family that still sit
  *  one GAP apart along their axis stay a connected run, everything else is a run
- *  of one. Layout logic, the prompt and ungrouping all see the same runs. */
+ *  of one. Layout logic, the prompt and ungrouping all see the same runs, in the
+ *  group's own order (later = drawn on top), which is what the layers panel edits. */
 export function explodeGroup(g: Group, widths: Record<string, number>): Group[] {
   if (!g.free) return [g];
   const placed = [...layoutOf(g, widths)].sort((a, b) => a.y - b.y || a.x - b.x);
+  const rank = new Map(g.items.map((it, i) => [it.id, i]));
   const used = new Set<string>();
   const out: Group[] = [];
   const near = (a: number, b: number) => Math.abs(a - b) <= 3;
@@ -1420,9 +1450,12 @@ export function explodeGroup(g: Group, widths: Record<string, number>): Group[] 
       run.push(next);
       last = next;
     }
-    out.push({ id: `${g.id}:${start.item.id}`, x: start.x, y: start.y, axis, items: run.map((r) => r.item) });
+    /* named after the member the group lists first, so the name survives a reorder */
+    const anchor = run.reduce((a, b) => ((rank.get(a.item.id) ?? 0) <= (rank.get(b.item.id) ?? 0) ? a : b));
+    out.push({ id: `${g.id}:${anchor.item.id}`, x: start.x, y: start.y, axis, items: run.map((r) => r.item) });
   }
-  return out;
+  const first = (r: Group) => Math.min(...r.items.map((it) => rank.get(it.id) ?? 0));
+  return out.sort((a, b) => first(a) - first(b));
 }
 
 /** corners of one part of a run: round outside, small where it meets a neighbour */
@@ -1508,6 +1541,8 @@ export function defaultTabsFor(kind: Kind): NavTab[] {
   switch (kind) {
     case "tabs":
       return TAB_LABELS[getLang()].map((label) => ({ icon: "", label }));
+    case "select":
+      return SELECT_OPTIONS[getLang()].map((label) => ({ icon: "", label }));
     case "fabMenu":
       return FAB_MENU_TABS[getLang()].map((t) => ({ ...t }));
     case "toolbar":
@@ -1543,7 +1578,8 @@ export function makeItem(kind: Kind): Item {
     it.radiusTop = 0;
     it.radiusBottom = 0;
   }
-  if (kind === "tabs" || kind === "fabMenu") it.tabs = defaultTabsFor(kind);
+  if (kind === "navRail") it.tabs = defaultTabs();
+  if (kind === "tabs" || kind === "fabMenu" || kind === "select") it.tabs = defaultTabsFor(kind);
   if (kind === "toolbar") it.tabs = defaultTabsFor(kind).slice(0, 4);
   return it;
 }
@@ -1555,10 +1591,11 @@ export function sizeOf(it: Item, widths: Record<string, number>) {
   const s = KIND_SPEC[it.kind];
   const n = it.size ?? s.defSize ?? s.w;
   switch (it.kind) {
+    case "switch":
     case "button":
+      return { w: it.size ?? widths[it.id] ?? s.w, h: s.h };
     case "extendedFab":
     case "chip":
-    case "switch":
     case "checkbox":
     case "splitButton":
     case "radio":
@@ -1579,19 +1616,29 @@ export function sizeOf(it: Item, widths: Record<string, number>) {
     case "loadingIndicator":
     case "image":
       return { w: n, h: n };
-    case "searchBar":
+    case "camera":
+      return { w: n, h: it.size2 ?? Math.round((n * 4) / 3) };
+    case "map":
+      return { w: n, h: it.size2 ?? Math.round((n * 3) / 4) };
     case "topAppBar":
+      /* the status-bar inset belongs to a phone: a bar wider than one has no status bar above it.
+       * (An Android tablet does; the canvas leaves that to the prompt.) */
+      return { w: n, h: 64 + (n > PHONE_W ? 0 : STATUS_BAR_H) };
+    case "searchBar":
     case "bottomNav":
     case "listItem":
     case "textField":
+    case "select":
     case "slider":
     case "linearProgress":
     case "divider":
       return { w: n, h: s.h };
     case "card":
-      return { w: n, h: Math.round(n * 0.5875) };
+      return { w: n, h: it.size2 ?? Math.round(n * 0.5875) };
     case "box":
       return { w: n, h: it.size2 ?? s.h };
+    case "navRail":
+      return { w: s.w, h: it.size2 ?? s.h };
     default:
       return { w: s.w, h: s.h };
   }
@@ -1603,12 +1650,20 @@ export function baseRadii(it: Item): Radii {
   const s = KIND_SPEC[it.kind];
   switch (it.kind) {
     case "box":
+      if (it.corners) return { ...it.corners };
+    // falls through
     case "bottomNav":
     case "topAppBar":
     case "tabs": {
       const t = it.radiusTop ?? 0;
       const b = it.radiusBottom ?? 0;
       return { tl: t, tr: t, bl: b, br: b };
+    }
+    case "navRail": {
+      /* a rail's corners are its left and right sides: radiusTop is the left pair, radiusBottom the right */
+      const l = it.radiusTop ?? 0;
+      const r = it.radiusBottom ?? 0;
+      return { tl: l, bl: l, tr: r, br: r };
     }
     case "fab":
       return uniformRadii(scaleR(Math.round((it.size ?? 56) * 0.28)));
@@ -1620,6 +1675,8 @@ export function baseRadii(it: Item): Radii {
     case "loadingIndicator":
       return uniformRadii((it.size ?? 48) / 2);
     case "image":
+    case "camera":
+    case "map":
     case "card":
       return uniformRadii(it.radiusTop ?? scaleR(s.radius));
     case "badge":
@@ -1664,6 +1721,7 @@ export function iconSlotsOf(it: Item): IconSlot[] {
         { key: "icon2", label: t("trailing"), value: it.icon2 ?? null },
       ];
     case "bottomNav":
+    case "navRail":
     case "toolbar":
       return (it.tabs ?? []).map((t, i) => ({
         key: `tab:${i}`,
