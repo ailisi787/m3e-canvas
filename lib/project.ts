@@ -1,4 +1,4 @@
-import { Doc, KIND_ORDER, Kind, VARIANTS, isPlace, isPlatform } from "./tokens";
+import { Doc, KIND_ORDER, Kind, VARIANTS, isPlace, isPlatform, isTrackThickness } from "./tokens";
 
 /* A project file is the Doc as JSON, nothing more. Reading one back only checks
  * the shape the editor relies on; the same migrations that run on a saved
@@ -16,6 +16,9 @@ const validCorners = (c: unknown) => c === undefined || (isRecord(c) && ["tl", "
 const validItem = (item: unknown) =>
   isRecord(item) &&
   validCorners(item.corners) &&
+  (item.railExpanded === undefined || typeof item.railExpanded === "boolean") &&
+  (item.railModal === undefined || typeof item.railModal === "boolean") &&
+  (item.trackThickness === undefined || isTrackThickness(item.trackThickness)) &&
   typeof item.id === "string" &&
   typeof item.kind === "string" &&
   KINDS.has(item.kind as Kind) &&
@@ -33,6 +36,7 @@ const validGroup = (group: unknown) =>
   Number.isFinite(group.x) &&
   Number.isFinite(group.y) &&
   (group.axis === "x" || group.axis === "y") &&
+  (group.locked === undefined || typeof group.locked === "boolean") &&
   Array.isArray(group.items) &&
   group.items.length > 0 &&
   group.items.every(validItem);

@@ -24,6 +24,11 @@ import {
   VARIANTS,
   Variant,
   actionSlotsOf,
+  TRACK_DEFAULT,
+  TRACK_MAX,
+  TRACK_MIN,
+  maxRingThickness,
+  progressThickness,
   contentWidth,
   defaultTabsFor,
   framePresetOf,
@@ -31,6 +36,7 @@ import {
   frameSizeOf,
   halfWidth,
   isPhoneFrame,
+  isWideRail,
   toggleIcon,
   iconSlotsOf,
   setIconSlot,
@@ -599,6 +605,7 @@ export function Inspector({
   onDuplicate,
   multi,
   grouped,
+  railStandalone = false,
   onGroup,
   onUngroup,
   onAlign,
@@ -616,6 +623,8 @@ export function Inspector({
   multi: number;
   /** the selection is exactly one hand-made group */
   grouped?: boolean;
+  /** Modal expansion is available only when this rail owns its group. */
+  railStandalone?: boolean;
   onGroup?: () => void;
   onUngroup?: () => void;
   /** lines the selected parts up with each other, or spaces them evenly */
@@ -901,7 +910,7 @@ export function Inspector({
       )}
 
       {spec.hasTabs && !editOn && (
-        <Section id="tabs" icon={isSelect ? "list" : "view_column"} title={t(isSelect ? "options" : "tabs", lang)} p={p}>
+        <Section id="tabs" icon={isSelect ? "list" : "view_column"} title={t(isSelect ? "options" : "tabs", lang)} p={p} onToggle={(open) => { if (!open && activeSlot?.key.startsWith("tab:")) setPickerOpen(false); }}>
           {!isSelect && (
             <Segmented
               options={(item.kind === "toolbar" ? [2, 3, 4, 5, 6] : [2, 3, 4, 5]).map((n) => ({ key: String(n), label: String(n) }))}
@@ -930,10 +939,11 @@ export function Inspector({
                   <button
                     onClick={() => {
                       setSlotKey(`tab:${i}`);
-                      setPickerOpen(true);
+                      setPickerOpen(!on);
                     }}
                     title={t("changeIcon", lang)}
                     aria-label={t("changeIcon", lang)}
+                    aria-expanded={on}
                     className="m3-press"
                     style={{
                       width: 40,
@@ -1031,7 +1041,7 @@ export function Inspector({
       )}
 
       {mainSlots.length > 0 && activeSlot && !item.src && (
-        <Section id="icon" icon="emoji_symbols" title={t("icon", lang)} p={p}>
+        <Section id="icon" icon="emoji_symbols" title={t("icon", lang)} p={p} onToggle={(open) => { if (!open && !activeSlot.key.startsWith("tab:")) setPickerOpen(false); }}>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {mainSlots.map((s) =>
               slotBtn(
@@ -1074,6 +1084,7 @@ export function Inspector({
           <IconPicker
             value={activeSlot.value}
             onChange={(icon) => change(setIconSlot(item, activeSlot.key, icon))}
+            onClose={() => setPickerOpen(false)}
             palette={p}
           />
         </div>
@@ -1184,9 +1195,64 @@ export function Inspector({
         </Section>
       )}
 
+      {item.kind === "navRail" && !editOn && (
+        <Section id="rail" icon="side_navigation" title={t("railState", lang)} p={p}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {!isWideRail(item) ? (
+              <>
+                <div style={{ fontSize: 12, color: p.onSurfaceVariant }}>{t("railLegacy", lang)}</div>
+                <button
+                  type="button"
+                  onClick={() => onChange({ railExpanded: false })}
+                  className="m3-press"
+                  style={{ height: 40, width: "100%", borderRadius: 20, border: `1px solid ${p.outline}`, background: "transparent", color: p.primary, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                >
+                  <Icon name="side_navigation" size={18} />
+                  {t("railUpgrade", lang)}
+                </button>
+              </>
+            ) : (
+              <>
+                <div role="group" aria-label={t("railState", lang)}>
+                  <Segmented
+                    options={[{ key: "collapsed", label: t("railCollapsed", lang) }, { key: "expanded", label: t("railExpanded", lang) }]}
+                    value={item.railExpanded ? "expanded" : "collapsed"}
+                    onChange={(v) => onChange({ railExpanded: v === "expanded" })}
+                    p={p}
+                  />
+                </div>
+                <div role="group" aria-label={t("railPresentation", lang)}>
+                  <div style={{ fontSize: 12, color: p.onSurfaceVariant, marginBottom: 6 }}>{t("railPresentation", lang)}</div>
+                  {railStandalone ? (
+                    <Segmented
+                      options={[{ key: "standard", label: t("railStandard", lang) }, { key: "modal", label: t("railModal", lang) }]}
+                      value={item.railModal ? "modal" : "standard"}
+                      onChange={(v) => onChange({ railExpanded: item.railExpanded ?? false, railModal: v === "modal" })}
+                      p={p}
+                    />
+                  ) : <div style={{ fontSize: 12, color: p.onSurfaceVariant }}>{t("railStandalone", lang)}</div>}
+                </div>
+              </>
+            )}
+          </div>
+        </Section>
+      )}
+
       {(spec.size || hasRadius) && !editOn && (
         <Section id="size" icon="straighten" title={t("size", lang)} p={p}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {spec.hasWavy && (
+              <Slider
+                icon="line_weight"
+                title={t("trackThickness", lang)}
+                value={progressThickness(item)}
+                min={TRACK_MIN}
+                max={item.kind === "circularProgress" ? maxRingThickness(item.size ?? spec.w) : TRACK_MAX}
+                step={1}
+                onChange={(trackThickness) => onChange({ trackThickness: trackThickness === TRACK_DEFAULT ? undefined : trackThickness })}
+                p={p}
+              />
+            )}
             {spec.size && (
               <>
                 <Slider

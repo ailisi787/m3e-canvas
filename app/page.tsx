@@ -76,6 +76,7 @@ import {
   uniformRadii,
   FULL_WIDTH,
   fitHeight,
+  railExpansionSide,
 } from "@/lib/tokens";
 import { Icon, M3Node, M3Static, MeasuredContent } from "@/components/M3Node";
 import { LayersPanel } from "@/components/Layers";
@@ -90,6 +91,7 @@ import { AiActionKey, AiPanel, aiErrorText } from "@/components/AiPanel";
 import { TidyState } from "@/components/ui";
 import { AiSettings, DEFAULT_AI, hasKey, isSecureUrl, loadAiSettings, proposeBehavior, proposeDescription, pushHistory, saveAiSettings } from "@/lib/ai";
 import { barSlotOf, bodyRect, carryFrame, pullInto, tidyFrame } from "@/lib/tidy";
+import { constrainModalRails, modalRailOf, updateRail } from "@/lib/rail";
 import { isProject, readProject, saveProject } from "@/lib/project";
 import { hasShareHash, readShareHash } from "@/lib/share";
 import { LoadingIndicator } from "@/components/Loading";
@@ -181,7 +183,7 @@ type Gesture =
       groups: { id: string; x: number; y: number }[];
       moved: boolean;
     }
-  | { kind: "group"; id: string; sx: number; sy: number; gx: number; gy: number; moved: boolean; overBin: boolean };
+  | { kind: "group"; id: string; sx: number; sy: number; gx: number; gy: number; moved: boolean; overBin: boolean; guide?: Guide | null };
 
 /** everything in a document apart from its screens and parts */
 type DocMeta = Omit<Doc, "groups" | "frames">;
@@ -223,6 +225,9 @@ function migrateGroups(groups: Group[], frames: Frame[]): Group[] {
 }
 
 /** Seed ids are deterministic so server and client render the same markup. */
+/* shown when an edit is refused because the group is locked */
+const lockedGroupMsg = () => t("lockedGroup", getLang());
+
 const seed = (lang: Lang = getLang()): Group[] => {
   const text = SEED_TEXT[lang];
   let n = 0;
@@ -331,7 +336,11 @@ const LEFT_TABS: { key: LeftTab; icon: string; title: "parts" | "layers" | "colo
 export default function Page() {
   /* ---------- document ---------- */
   const [editAccess, setEditAccess] = useState<"checking" | "editable" | "readonly">("checking");
-  const [groups, setGroups] = useState<Group[]>(seed);
+  const [groups, setGroupState] = useState<Group[]>(seed);
+  /* Enforce the standalone-modal rule for imports, grouping, undo and all edits. */
+  const setGroups = useCallback((next: Group[] | ((prev: Group[]) => Group[])) => {
+    setGroupState((prev) => constrainModalRails(typeof next === "function" ? next(prev) : next));
+  }, []);
   const [frames, setFrames] = useState<Frame[]>(SEED_FRAMES);
   const [paletteKey, setPaletteKey] = useState("purple");
   const [customPalette, setCustomPalette] = useState<Palette | null>(null);
@@ -586,12 +595,15 @@ export default function Page() {
   /** Puts a stored or opened document into the editor. Fields a partial document
    *  leaves out keep their current value, or go back to the default when `reset`. */
   const applyDoc = (doc: Partial<Doc>, reset: boolean) => {
+    setPreviewId(null);
+    viewBeforePreview.current = null;
     const frames = Array.isArray(doc.frames) ? doc.frames : framesRef.current;
     if (Array.isArray(doc.groups)) setGroups(migrateGroups(doc.groups, frames));
     if (Array.isArray(doc.frames)) setFrames(doc.frames);
     if (typeof doc.paletteKey === "string" && doc.paletteKey) setPaletteKey(doc.paletteKey);
     else if (reset) setPaletteKey("purple");
-    if (doc.customPalette && typeof doc.customPalette.primary === "string") setCustomPalette(doc.customPalette);
+    /* normalize once so a scheme saved before the secondary role gets it and keeps it on re-save */
+    if (doc.customPalette && typeof doc.customPalette.primary === "string") setCustomPalette(paletteOf("custom", doc.customPalette));
     else if (reset) setCustomPalette(null);
     if (typeof doc.dynamicColor === "boolean") setDynamicColor(doc.dynamicColor);
     else if (reset) setDynamicColor(false);
@@ -824,8 +836,9 @@ export default function Page() {
       y: (clientY - (r?.top ?? 0) - v.y) / v.z,
     };
   };
+  /* only the open left panel accepts a drop for deletion; the narrow rail never does */
   const inBin = (clientX: number) =>
-    !mobileRef.current && clientX >= 0 && clientX <= (leftOpenRef.current ? leftWRef.current : RAIL_W);
+    !mobileRef.current && leftOpenRef.current && clientX >= 0 && clientX <= leftWRef.current;
 
   const setZoomAt = useCallback((nz: number, cx?: number, cy?: number) => {
     const r = canvasRect();
@@ -998,7 +1011,8 @@ export default function Page() {
       let best: Snap | null = null;
       let bestD = 1;
       for (const g of groupsRef.current) {
-        if (g.free || g.axis !== spec.axis || !g.items[0] || !canJoin(g.items[0], item))
+        /* a locked run is finished: nothing joins it, so it never moves to make room */
+        if (g.free || g.locked || g.axis !== spec.axis || !g.items[0] || !canJoin(g.items[0], item))
           continue;
         for (let k = 0; k <= g.items.length; k++) {
           const r = restPos(g, k, sz);
@@ -1024,15 +1038,14 @@ export default function Page() {
 
   /** Canva-style alignment: edges and centres of neighbours and of the frame
    *  pull the part gently into line and draw a guide while they do. */
-  const findGuide = useCallback(
-    (item: Item, left: number, top: number): Guide | null => {
-      const sz = sizeRef(item);
+  const guideFor = useCallback(
+    (left: number, top: number, sz: { w: number; h: number }, skip: Set<string>): Guide | null => {
       const tol = GUIDE_PX / viewRef.current.z;
       const xs: number[] = [];
       const ys: number[] = [];
       for (const g of groupsRef.current) {
         for (const pl of layoutOf(g, widthsRef.current)) {
-          if (pl.item.id === item.id) continue;
+          if (skip.has(pl.item.id)) continue;
           xs.push(pl.x, pl.x + pl.w / 2, pl.x + pl.w);
           ys.push(pl.y, pl.y + pl.h / 2, pl.y + pl.h);
         }
@@ -1082,7 +1095,11 @@ export default function Page() {
         }
       return best.x === undefined && best.y === undefined ? null : best;
     },
-    [sizeRef],
+    [],
+  );
+  const findGuide = useCallback(
+    (item: Item, left: number, top: number): Guide | null => guideFor(left, top, sizeRef(item), new Set([item.id])),
+    [guideFor, sizeRef],
   );
 
   /* ---------- pointer: parts ---------- */
@@ -1128,6 +1145,8 @@ export default function Page() {
       setSelectedFrameId(null);
       setSelectedLinkId(null);
       setRightTab("edit");
+      /* a locked group stays selectable, but dragging it does nothing */
+      if (g.locked) return;
       const gg: Gesture = { kind: "group", id: g.id, sx: e.clientX, sy: e.clientY, gx: g.x, gy: g.y, moved: false, overBin: false };
       gestureRef.current = gg;
       setGesture(gg);
@@ -1145,6 +1164,8 @@ export default function Page() {
     setSelectedFrameId(null);
     setSelectedLinkId(null);
     setRightTab("edit");
+    /* a locked group's part stays selectable, but dragging it does nothing */
+    if (g.locked) return;
     setPressedId(item.id);
     const d: DragState = {
       item,
@@ -1202,6 +1223,10 @@ export default function Page() {
 
   useEffect(() => {
     if (!isDragging) return;
+    /* Ctrl overrides auto-snap for as long as it is held: no magnet slot, no
+       alignment guide, no 4dp grid. A pointer move carries its own ctrlKey, and
+       key events cover the moments in between when the pointer is still. */
+    let ctrlHeld = false;
 
     const move = (e: PointerEvent) => {
       const d = dragRef.current;
@@ -1209,6 +1234,7 @@ export default function Page() {
       const pt = toWorld(e.clientX, e.clientY);
       d.px = pt.x;
       d.py = pt.y;
+      ctrlHeld = e.ctrlKey || e.metaKey;
 
       if (!d.active) {
         if (
@@ -1251,18 +1277,20 @@ export default function Page() {
         return;
       }
 
-      d.overBin = inBin(e.clientX);
-      d.snap = d.overBin
-        ? null
-        : findSnap(d.item, pt.x - d.offX, pt.y - d.offY);
+      /* a part being added from the palette has nothing to delete yet; dropping it back there just cancels */
+      d.overBin = !d.fromPalette && inBin(e.clientX);
+      d.snap =
+        d.overBin || ctrlHeld
+          ? null
+          : findSnap(d.item, pt.x - d.offX, pt.y - d.offY);
       d.guide =
-        d.overBin || d.snap
+        d.overBin || d.snap || ctrlHeld
           ? null
           : findGuide(d.item, pt.x - d.offX, pt.y - d.offY);
       setDrag({ ...d });
     };
 
-    const up = () => {
+    const up = (e: PointerEvent) => {
       const d = dragRef.current;
       dragRef.current = null;
       setPressedId(null);
@@ -1271,6 +1299,8 @@ export default function Page() {
         setDrag(null);
         return;
       }
+
+      const loose = ctrlHeld || e.ctrlKey || e.metaKey;
 
       const item = d.item;
       const sz = sizeRef(item);
@@ -1281,7 +1311,7 @@ export default function Page() {
         return;
       }
 
-      if (d.snap) {
+      if (!loose && d.snap) {
         const t = d.snap;
         setDrag({ ...d, snap: { ...t, pull: 1 }, settling: true });
         const commit = () => {
@@ -1315,8 +1345,9 @@ export default function Page() {
 
       const rect = canvasRect();
       const v = viewRef.current;
-      const rawX = d.guide?.x ?? d.px - d.offX;
-      const rawY = d.guide?.y ?? d.py - d.offY;
+      /* a Ctrl drop lands where the cursor is, untouched by any guide hold */
+      const rawX = loose ? d.px - d.offX : d.guide?.x ?? d.px - d.offX;
+      const rawY = loose ? d.py - d.offY : d.guide?.y ?? d.py - d.offY;
       const screenL = (rawX + sz.w) * v.z + v.x;
       const screenT = (rawY + sz.h) * v.z + v.y;
       const screenR = rawX * v.z + v.x;
@@ -1349,18 +1380,25 @@ export default function Page() {
       const placedItem = targetFrame && slot ? (isBar ? carryItemSize(item, { w: PHONE_W, h: PHONE_H }, { w: slot.w, h: frameSizeOf(targetFrame).h }) : fitHeight(item, frameSizeOf(targetFrame).h)) : item;
       /* off any guide, the part settles on the 4dp grid of the screen it lands on */
       const origin = targetFrame ?? { x: 0, y: 0 };
+      /* Ctrl keeps the pixel the cursor chose; a guide holds its whole-pixel
+         position; otherwise the axis settles on the 4dp grid as before.
+         A bar dropped on a screen keeps its own spanning rule. */
+      const settle = (onGuide: boolean, pos: number, grid: number) =>
+        loose || onGuide ? Math.round(pos) : onGrid(pos, grid);
       const dropped: Group = {
         id: uid(),
-        x: isBar && slot ? Math.round(slot.x) : d.guide?.gx !== undefined ? Math.round(rawX) : onGrid(rawX, origin.x),
-        y: d.guide?.gy !== undefined ? Math.round(rawY) : onGrid(rawY, origin.y),
+        x: isBar && slot ? Math.round(slot.x) : settle(d.guide?.gx !== undefined, rawX, origin.x),
+        y: settle(d.guide?.gy !== undefined, rawY, origin.y),
         axis: connectSpecOf(item)?.axis ?? "x",
         items: [placedItem],
       };
       /* a part that grew to the screen's width is kept inside it, then settles back on the grid */
       const pulled = targetFrame ? pullInto(dropped, targetFrame, widthsRef.current) : dropped;
+      /* a Ctrl drop keeps whatever pullInto chose, whole pixels included;
+         otherwise a part pulled back in settles on the grid again */
       const ng =
-        pulled === dropped
-          ? dropped
+        pulled === dropped || loose
+          ? pulled
           : { ...pulled, x: d.guide?.gx !== undefined ? pulled.x : onGrid(pulled.x, origin.x), y: d.guide?.gy !== undefined ? pulled.y : onGrid(pulled.y, origin.y) };
       setGroups((prev) =>
         prev.some((g) => g.items.some((it) => it.id === item.id))
@@ -1370,6 +1408,23 @@ export default function Page() {
       setDrag(null);
     };
 
+    /* Ctrl (or Cmd on a Mac) pressed or released while the pointer is still: the drawn
+       magnet and guide must leave (or be free to return) right away, not on the next move */
+    const onCtrl = (e: KeyboardEvent, held: boolean) => {
+      if ((e.key !== "Control" && e.key !== "Meta") || e.repeat) return;
+      const d = dragRef.current;
+      if (!d) return;
+      ctrlHeld = held;
+      if (held) {
+        d.snap = null;
+        d.guide = null;
+      }
+      setDrag({ ...d });
+    };
+    const onCtrlDown = (e: KeyboardEvent) => onCtrl(e, true);
+    const onCtrlUp = (e: KeyboardEvent) => onCtrl(e, false);
+    window.addEventListener("keydown", onCtrlDown);
+    window.addEventListener("keyup", onCtrlUp);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
@@ -1377,6 +1432,8 @@ export default function Page() {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
+      window.removeEventListener("keydown", onCtrlDown);
+      window.removeEventListener("keyup", onCtrlUp);
     };
     // handlers read live state through refs, so this binds once per drag
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1515,16 +1572,26 @@ export default function Page() {
         }
         instantRef.current.add(g.id);
         g.overBin = inBin(e.clientX);
+        const gr = groupsRef.current.find((x) => x.id === g.id);
+        if (!gr) return;
+        /* a moved group lines up with its neighbours like a single part does, and off
+           any guide settles on the 4dp grid of the screen it is over; Ctrl (or Cmd)
+           skips both */
+        const moved = { ...gr, x: g.gx + dx, y: g.gy + dy };
+        const loose = e.ctrlKey || e.metaKey;
+        const b = groupBounds(moved, widthsRef.current);
+        const guide = loose || g.overBin ? null : guideFor(b.l, b.t, { w: b.r - b.l, h: b.b - b.t }, new Set(gr.items.map((it) => it.id)));
+        g.guide = guide;
         setGesture({ ...g });
-        setGroups((gs) =>
-          gs.map((gr) => {
-            if (gr.id !== g.id) return gr;
-            /* a moved group settles on the 4dp grid of the screen it is over */
-            const moved = { ...gr, x: g.gx + dx, y: g.gy + dy };
-            const f = frameOfGroup(moved, framesRef.current, widthsRef.current);
-            return { ...moved, x: onGrid(moved.x, f?.x ?? 0), y: onGrid(moved.y, f?.y ?? 0) };
-          }),
-        );
+        const f = frameOfGroup(moved, framesRef.current, widthsRef.current);
+        const placed = loose
+          ? moved
+          : {
+              ...moved,
+              x: guide?.x !== undefined ? Math.round(moved.x + guide.x - b.l) : onGrid(moved.x, f?.x ?? 0),
+              y: guide?.y !== undefined ? Math.round(moved.y + guide.y - b.t) : onGrid(moved.y, f?.y ?? 0),
+            };
+        setGroups((gs) => gs.map((x) => (x.id === g.id ? placed : x)));
         return;
       }
       if (g.kind === "frame") {
@@ -1654,10 +1721,16 @@ export default function Page() {
   const patchSelected = (patch: Partial<Item>) => {
     if (!primaryId) return;
     const id = primaryId;
+    /* a rail state change resizes it too, so it counts as a resize for the lock */
+    const resizes = "size" in patch || "size2" in patch || "railExpanded" in patch || "railModal" in patch;
+    /* a resize would reflow and move the locked group; other edits leave its layout alone */
+    if (resizes && groupsRef.current.some((g) => g.locked && g.items.some((it) => it.id === id))) {
+      showToast(lockedGroupMsg());
+      return;
+    }
     snapshotFor(id + ":" + Object.keys(patch).join(","));
-    const resizes = "size" in patch || "size2" in patch;
     setGroups((prev) =>
-      prev.map((g) => {
+      "railExpanded" in patch || "railModal" in patch ? updateRail(prev, framesRef.current, widthsRef.current, id, patch) : prev.map((g) => {
         const idx = g.items.findIndex((it) => it.id === id);
         if (idx < 0) return g;
         const next = { ...g.items[idx], ...patch };
@@ -1679,10 +1752,17 @@ export default function Page() {
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
     const ids = new Set(selectedIds);
+    /* nothing deletable when every selected part sits in a locked group: no snapshot, keep the selection */
+    if (groupsRef.current.every((g) => g.locked || !g.items.some((it) => ids.has(it.id)))) {
+      showToast(lockedGroupMsg());
+      return;
+    }
     snapshot();
     setGroups((prev) =>
       prev
         .map((g) => {
+          /* Delete / Backspace leaves a locked group and its parts alone */
+          if (g.locked) return g;
           if (g.free) return collapseFree({ ...g, items: g.items.filter((it) => !ids.has(it.id)) }, widthsRef.current);
           let x = g.x;
           let y = g.y;
@@ -1711,6 +1791,7 @@ export default function Page() {
       for (const it of fg.items) pos[idMap.get(it.id)!] = fg.pos?.[it.id] ?? { x: 0, y: 0 };
       const copyG: Group = {
         ...fg,
+        locked: undefined,
         id: uid(),
         x: fg.x + 24,
         y: fg.y + 24,
@@ -1729,6 +1810,13 @@ export default function Page() {
       id: uid(),
       tabs: selected.tabs?.map((t) => ({ ...t })),
     };
+    /* a copied modal rail starts collapsed and standard: a screen shows one modal rail, and
+       the copy sits inward of the edge the original remembered */
+    if (copy.kind === "navRail" && copy.railModal) {
+      copy.railModal = false;
+      copy.railExpanded = false;
+      delete copy[railExpansionSide];
+    }
     snapshot();
     setGroups((prev) => [
       ...prev,
@@ -1755,7 +1843,8 @@ export default function Page() {
     if (!g) return;
     let group: Group;
     if (g.items.every((it) => ids.has(it.id))) {
-      group = structuredClone(g);
+      /* a copy starts unlocked; the lock belongs to the original */
+      group = { ...structuredClone(g), locked: undefined };
     } else {
       const rect = itemRects().find((r) => r.id === selected.id);
       if (!rect) return;
@@ -1821,8 +1910,10 @@ export default function Page() {
     (kind: AlignKind) => {
       const ids = new Set(selectedIds);
       const all = groupsRef.current;
-      const units = all.filter((g) => g.items.some((it) => ids.has(it.id)));
+      /* a locked group is left out of the alignment and stays an obstacle for the others */
+      const units = all.filter((g) => !g.locked && g.items.some((it) => ids.has(it.id)));
       if (units.length === 0) return;
+      const unitIds = new Set(units.map((g) => g.id));
       const distributing = kind === "distributeH" || kind === "distributeV";
       const horizontal = kind === "left" || kind === "centerH" || kind === "right" || kind === "distributeH";
       const rects = new Map(all.map((g) => [g.id, groupBounds(g, widthsRef.current)]));
@@ -1848,7 +1939,7 @@ export default function Page() {
         });
       } else {
         /* parts that are not moving, on the same screen, that a moved unit must not land on */
-        const others = all.filter((g) => !ids.has(g.items[0].id) && !g.items.some((it) => ids.has(it.id)) && (!screenId || frameOfGroup(g, framesRef.current, widthsRef.current)?.id === screenId)).map((g) => rects.get(g.id)!);
+        const others = all.filter((g) => !unitIds.has(g.id) && (!screenId || frameOfGroup(g, framesRef.current, widthsRef.current)?.id === screenId)).map((g) => rects.get(g.id)!);
         const hits = (r: { l: number; t: number; r: number; b: number }) => others.filter((o) => o.l < r.r && o.r > r.l && o.t < r.b && o.b > r.t);
         /* stepping away from the aligned edge: right of a left edge, up from a bottom edge; a centre tries both ways */
         const dir = kind === "left" || kind === "top" ? 1 : kind === "right" || kind === "bottom" ? -1 : 0;
@@ -1894,6 +1985,11 @@ export default function Page() {
   const groupSelected = useCallback(() => {
     const ids = new Set(selectedIds);
     if (ids.size < 2) return;
+    /* regrouping would carry a locked group's parts into an unlocked group */
+    if (groupsRef.current.some((g) => g.locked && g.items.some((it) => ids.has(it.id)))) {
+      showToast(lockedGroupMsg());
+      return;
+    }
     const rects = new Map(itemRects().map((r) => [r.id, r]));
     const picked: Item[] = [];
     let top = -1;
@@ -1943,6 +2039,11 @@ export default function Page() {
   const ungroupSelected = useCallback(() => {
     const g = selectedGroup;
     if (!g) return;
+    /* ungrouping would replace a locked group with unlocked single runs */
+    if (g.locked) {
+      showToast(lockedGroupMsg());
+      return;
+    }
     snapshot();
     const singles: Group[] = explodeGroup(g, widthsRef.current).map((run) => ({ ...run, id: uid() }));
     for (const sg of singles) instantRef.current.add(sg.id);
@@ -1979,12 +2080,17 @@ export default function Page() {
       }
       if (selectedIds.length === 0) return;
       const ids = new Set(selectedIds);
+      /* a locked group stays where it is, even when its parts are selected */
+      const moving = new Set(
+        groupsRef.current
+          .filter((g) => !g.locked && g.items.some((it) => ids.has(it.id)))
+          .map((g) => g.id),
+      );
+      if (moving.size === 0) return;
       snapshotFor("nudge:" + selectedIds.join(","));
       setGroups((prev) =>
         prev.map((g) =>
-          g.items.some((it) => ids.has(it.id))
-            ? { ...g, x: g.x + dx, y: g.y + dy }
-            : g,
+          moving.has(g.id) ? { ...g, x: g.x + dx, y: g.y + dy } : g,
         ),
       );
     },
@@ -2511,7 +2617,7 @@ export default function Page() {
           g.free ? (
             ((corners) =>
             layoutOf(g, widths).map((pl) => (
-              <div key={pl.item.id} style={{ position: "absolute", left: pl.x - f.x, top: pl.y - f.y }}>
+              <div key={pl.item.id} style={{ position: "absolute", left: pl.x - f.x, top: pl.y - f.y, zIndex: modalRailOf(g) ? 2 : undefined }}>
                 <M3Static
                   item={pl.item}
                   palette={p}
@@ -2527,6 +2633,7 @@ export default function Page() {
               position: "absolute",
               left: g.x - f.x,
               top: g.y - f.y,
+              zIndex: modalRailOf(g) ? 2 : undefined,
               display: "flex",
               flexDirection: g.axis === "x" ? "row" : "column",
               alignItems: g.axis === "x" ? "center" : "stretch",
@@ -2554,6 +2661,9 @@ export default function Page() {
             })}
           </div>
           ),
+        )}
+        {gs.some((g) => modalRailOf(g)) && (
+          <div aria-hidden style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.32)", pointerEvents: "none", zIndex: 1 }} />
         )}
       </div>
     );
@@ -2675,7 +2785,7 @@ export default function Page() {
       }
       if (e.key.startsWith("Arrow")) {
         e.preventDefault();
-        const s = e.shiftKey ? 10 : 1;
+        const s = e.shiftKey ? 8 : 1;
         nudge(
           e.key === "ArrowLeft" ? -s : e.key === "ArrowRight" ? s : 0,
           e.key === "ArrowUp" ? -s : e.key === "ArrowDown" ? s : 0,
@@ -2879,12 +2989,18 @@ export default function Page() {
     setGroups((gs) => [...gs.filter((g) => !inFrame.has(g.id)), ...ordered]);
   };
 
+  /** flips a group's lock from its row's lock icon in the Layers panel */
+  const toggleGroupLock = (id: string) => {
+    snapshot();
+    setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, locked: !g.locked } : g)));
+  };
+
   /** The parts of one group in a new order: reading order for a connected run, back to
    *  front for a free group. Inside a free group a hidden run keeps its slots, handed out
    *  again in the new order, so reordering a list really moves its rows. */
   const reorderGroupItems = (groupId: string, order: string[]) => {
     const g = groupsRef.current.find((x) => x.id === groupId);
-    if (!g) return;
+    if (!g || g.locked) return;
     const byId = new Map(g.items.map((it) => [it.id, it]));
     const items = order.map((id) => byId.get(id)).filter((it): it is Item => !!it);
     if (items.length !== g.items.length || new Set(order).size !== order.length) return;
@@ -2908,6 +3024,7 @@ export default function Page() {
   };
 
   const renderGroup = (g: Group, ox: number, oy: number) => {
+    const modalRail = modalRailOf(g);
     if (g.free) {
       const instantG = instantRef.current.has(g.id);
       const allOn = g.items.every((it) => selectedSet.has(it.id));
@@ -2918,7 +3035,7 @@ export default function Page() {
           initial={false}
           animate={{ x: g.x - ox, y: g.y - oy }}
           transition={instantG ? INSTANT : OPEN}
-          style={{ position: "absolute", left: 0, top: 0 }}
+          style={{ position: "absolute", left: 0, top: 0, zIndex: modalRail ? 2 : undefined }}
         >
           {layoutOf(g, widths).map((pl) => (
             <div key={pl.item.id} style={{ position: "absolute", left: pl.x - g.x, top: pl.y - g.y }}>
@@ -2978,6 +3095,7 @@ export default function Page() {
         }}
         transition={instant ? INSTANT : OPEN}
         style={{
+          zIndex: modalRail ? 2 : undefined,
           position: "absolute",
           left: 0,
           top: 0,
@@ -3052,7 +3170,8 @@ export default function Page() {
   };
 
   const showRight = rightOpen && !isMobile;
-  const guide = drag?.active ? drag.guide : null;
+  const overBin = (!!drag?.active && drag.overBin) || (gesture?.kind === "group" && gesture.overBin);
+  const guide = drag?.active ? drag.guide : gesture?.kind === "group" && gesture.moved ? (gesture.guide ?? null) : null;
   const visibleWorld = (() => {
     const r = canvasRef.current?.getBoundingClientRect();
     return {
@@ -3123,9 +3242,88 @@ export default function Page() {
           </div>
         )}
 
+
+        {/* the part in flight rides above every panel so it stays visible while crossing them */}
+        {drag?.active && (() => {
+          const r = canvasRect();
+          return (
+            <div aria-hidden style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 60, overflow: "hidden" }}>
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  transform: `translate(${(r?.left ?? 0) + view.x}px, ${(r?.top ?? 0) + view.y}px) scale(${view.z})`,
+                  transformOrigin: "0 0",
+                  fontFamily: fontFamilyOf(theme.font, lang),
+                }}
+              >
+      {/* the part in flight */}
+      {drag?.active && (
+        <motion.div
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            x: sx,
+            y: sy,
+            pointerEvents: "none",
+            zIndex: 50,
+          }}
+          animate={{
+            opacity: drag.overBin ? 0.4 : 1,
+            scale: drag.overBin ? 0.84 : 1,
+          }}
+          transition={{
+            type: "spring",
+            stiffness: 520,
+            damping: 34,
+            mass: 0.6,
+          }}
+        >
+          <M3Node
+            item={drag.item}
+            palette={p}
+            widths={widths}
+            dragging
+            radii={(() => {
+              const conn = connectSpecOf(drag.item);
+              if (!conn || !drag.snap) return baseRadii(drag.item);
+              const g = groupsRef.current.find(
+                (x) => x.id === drag.snap!.groupId,
+              );
+              const mm = (g?.items.length ?? 0) + 1;
+              const k = drag.snap.index;
+              return runRadii(
+                conn.axis,
+                k === 0,
+                k === mm - 1,
+                k > 0,
+                k < mm - 1,
+                drag.snap.pull,
+                conn.outer,
+                conn.inner,
+              );
+            })()}
+          />
+        </motion.div>
+      )}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ---- left: rail + parts / layers ---- */}
         {!isMobile && (
           <aside style={{ ...panelStyle, width: leftOpen ? leftW : RAIL_W, flexDirection: "row", transition: "width 200ms cubic-bezier(0.2, 0, 0, 1)" }}>
+            {/* dropping a canvas part anywhere on this side deletes it, whichever tab is open */}
+            {overBin && (
+              <div style={{ position: "absolute", inset: 0, zIndex: 5, background: "rgba(179,38,30,0.10)", display: "grid", placeItems: "center", pointerEvents: "none", color: p.error }}>
+                <div style={{ width: 72, height: 72, borderRadius: 36, background: p.errorContainer, color: p.onErrorContainer, display: "grid", placeItems: "center", boxShadow: "0 4px 14px rgba(0,0,0,0.14)" }}>
+                  <Icon name="delete" size={34} />
+                </div>
+              </div>
+            )}
             <div
               onPointerEnter={() => setRailHover(true)}
               onPointerLeave={() => setRailHover(false)}
@@ -3213,7 +3411,6 @@ export default function Page() {
                       )
                     }
                     onPartPointerDown={onPartPointerDown}
-                    overBin={(!!drag?.active && drag.overBin) || (gesture?.kind === "group" && gesture.overBin)}
                   />
                 ) : leftTab === "color" ? (
                   <ColorPanel
@@ -3255,6 +3452,7 @@ export default function Page() {
                       setRightTab("edit");
                     }}
                     onReorder={reorderLayers}
+                    onToggleLock={toggleGroupLock}
                     onReorderItems={reorderGroupItems}
                     onDragging={onLayerDragging}
                   />
@@ -3397,6 +3595,9 @@ export default function Page() {
                           {groups
                             .filter((g) => frameOf.get(g.id) === f.id)
                             .map((g) => renderGroup(g, f.x, f.y))}
+                          {groups.some((g) => frameOf.get(g.id) === f.id && modalRailOf(g)) && (
+                            <div aria-hidden style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.32)", pointerEvents: "none", zIndex: 1 }} />
+                          )}
                           {draftBusy && (
                             <div style={{ position: "absolute", inset: 0, zIndex: 90, background: canvasBg, display: "grid", placeItems: "center" }}>
                               <LoadingIndicator size={96} color="url(#m3e-drafting)" />
@@ -3412,56 +3613,6 @@ export default function Page() {
                 .filter((g) => !frameOf.has(g.id))
                 .map((g) => renderGroup(g, 0, 0))}
 
-              {/* the part in flight */}
-              {drag?.active && (
-                <motion.div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: 0,
-                    x: sx,
-                    y: sy,
-                    pointerEvents: "none",
-                    zIndex: 50,
-                  }}
-                  animate={{
-                    opacity: drag.overBin ? 0.4 : 1,
-                    scale: drag.overBin ? 0.84 : 1,
-                  }}
-                  transition={{
-                    type: "spring",
-                    stiffness: 520,
-                    damping: 34,
-                    mass: 0.6,
-                  }}
-                >
-                  <M3Node
-                    item={drag.item}
-                    palette={p}
-                    widths={widths}
-                    dragging
-                    radii={(() => {
-                      const conn = connectSpecOf(drag.item);
-                      if (!conn || !drag.snap) return baseRadii(drag.item);
-                      const g = groupsRef.current.find(
-                        (x) => x.id === drag.snap!.groupId,
-                      );
-                      const mm = (g?.items.length ?? 0) + 1;
-                      const k = drag.snap.index;
-                      return runRadii(
-                        conn.axis,
-                        k === 0,
-                        k === mm - 1,
-                        k > 0,
-                        k < mm - 1,
-                        drag.snap.pull,
-                        conn.outer,
-                        conn.inner,
-                      );
-                    })()}
-                  />
-                </motion.div>
-              )}
 
               {links.length > 0 && (
                 <svg
@@ -3870,6 +4021,7 @@ export default function Page() {
                     onCancel: cancelAi,
                   }}
                   item={selectedIds.length > 1 ? null : selected}
+                  railStandalone={groups.some((g) => g.items.length === 1 && g.items[0].id === selected?.id)}
                   frame={selectedPartFrame}
                   palette={p}
                   frames={frame === "phone" ? frames : []}
