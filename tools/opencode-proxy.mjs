@@ -3,10 +3,15 @@
  * headers the upstream does not send (its API only serves command-line tools).
  * Zero dependencies; nothing is stored. Run: node tools/opencode-proxy.mjs */
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import { request as httpsRequest } from "node:https";
 
 const PORT = 8787;
 const UPSTREAM = "https://opencode.ai/zen/go";
+
+/* Go asks every client to identify itself with a stable session id per
+ * conversation (x-opencode-session) so it can route and cache well. */
+const SESSION = randomUUID();
 
 /** CORS answers for every request, echoing the headers the browser asked for */
 const corsHeaders = (req) => ({
@@ -34,6 +39,8 @@ const server = http.createServer((req, res) => {
   delete headers.referer;
   delete headers["access-control-request-headers"];
   headers["accept-encoding"] = "identity";
+  headers["x-opencode-session"] = SESSION;
+  headers["user-agent"] = "m3e-canvas-proxy/1.0";
 
   const upstream = httpsRequest(
     target,
