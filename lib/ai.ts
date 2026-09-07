@@ -91,7 +91,7 @@ export async function complete(s: AiSettings, system: string, user: string, sign
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true",
       },
-      body: JSON.stringify({ model, max_tokens: Math.min(maxTokens, 8192), system, messages: [{ role: "user", content: user }] }),
+      body: JSON.stringify({ model, max_tokens: Math.min(maxTokens, 64000), system, messages: [{ role: "user", content: user }] }),
     });
     if (!res.ok) throw new Error(await readError(res));
     const j = await res.json();
@@ -111,8 +111,8 @@ export async function complete(s: AiSettings, system: string, user: string, sign
     body: JSON.stringify({
       model,
       /* OpenAI's newer models refuse `max_tokens` and default generously, so they get no budget;
-         the other compatible endpoints cap around 8k */
-      ...(s.provider === "openai" ? {} : { max_tokens: Math.min(maxTokens, 8192) }),
+         DeepSeek's API caps at 8k, Claude and Gemini take 64k */
+      ...(s.provider === "openai" ? {} : { max_tokens: Math.min(maxTokens, s.provider === "deepseek" ? 8192 : 64000) }),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -246,8 +246,8 @@ export async function draftDesign(s: AiSettings, guide: string, idea: string, la
     "",
     guide,
   ].join("\n");
-  const user = [`Sketch this app: ${idea.trim()}`, `Write every label, title and note in ${LANG_NAME[lang]}.`, "Three to five screens. Keep it simple."].join("\n");
-  const j = parseJsonObject(await complete(s, system, user, signal, 12000));
+  const user = [`Sketch this app: ${idea.trim()}`, `Write every label, title and note in ${LANG_NAME[lang]}.`, "Three screens at most. Keep every screen light."].join("\n");
+  const j = parseJsonObject(await complete(s, system, user, signal, 64000));
   if (!isProject(j)) throw new Error("json");
   return j;
 }
