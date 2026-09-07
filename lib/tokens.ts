@@ -32,6 +32,27 @@ export const RAIL_W = 80;
 export const RAIL_TOP = 44;
 export const RAIL_ITEM_H = 52;
 export const RAIL_GAP = 12;
+/** M3 Expressive navigation rail tokens; the 80dp rail above is kept for saved sketches. */
+export const RAIL_COLLAPSED_W = 96;
+export const RAIL_EXPANDED_W = 220;
+export const isWideRail = (it: Item) => it.railExpanded !== undefined || it.railModal === true;
+export const railWidth = (it: Item) => it.railExpanded ? RAIL_EXPANDED_W : isWideRail(it) ? RAIL_COLLAPSED_W : RAIL_W;
+/** Modal expansion overlays the body, retaining only the collapsed rail's layout slot. */
+export const railLayoutWidth = (it: Item) => it.railModal ? RAIL_COLLAPSED_W : railWidth(it);
+/** Runtime-only expansion edge: copied by item edits, never included in JSON. */
+export const railExpansionSide = Symbol("railExpansionSide");
+/** Shared drawing / hit-area geometry. The header is a 48dp menu button with an 8dp gap. */
+export function railMetrics(it: Item) {
+  const wide = isWideRail(it);
+  return {
+    width: railWidth(it),
+    headerLeft: it.railExpanded ? 16 : (railWidth(it) - 48) / 2,
+    inset: wide ? 12 : 6,
+    top: RAIL_TOP + (wide ? 56 : 0),
+    itemHeight: wide ? 56 : RAIL_ITEM_H,
+    gap: wide ? (it.railExpanded ? 0 : 4) : RAIL_GAP,
+  };
+}
 /** system insets: the status bar above a top app bar and the gesture area below a navigation bar.
  *  Both bars carry their inset as extra height so their background reaches the rounded screen edge. */
 export const STATUS_BAR_H = 24;
@@ -72,6 +93,7 @@ export type Palette = {
   primaryContainer: string;
   onPrimaryContainer: string;
   inversePrimary: string;
+  secondary: string;
   secondaryContainer: string;
   onSecondaryContainer: string;
   tertiaryContainer: string;
@@ -100,7 +122,8 @@ const ERROR = {
   onErrorContainer: "#410E0B",
 };
 
-export const PALETTES: Palette[] = [
+/* presets are authored without secondary; it is derived from the seed below */
+const PRESETS: Omit<Palette, "secondary">[] = [
   {
     key: "purple",
     label: "Purple",
@@ -277,6 +300,7 @@ export const PALETTES: Palette[] = [
     ...ERROR,
   },
 ];
+export const PALETTES: Palette[] = PRESETS.map((p) => ({ ...p, secondary: schemeFromSeed(p.primary, p.label, { keepChroma: true }).secondary }));
 
 /* ---------- theme: the four expressive axes ---------- */
 export type ShapeScale = "square" | "rounded" | "full";
@@ -378,7 +402,10 @@ export function scaleR(r: number): number {
  *  other contrast levels are generated from the same seed. */
 export function paletteOf(key: string, custom?: Palette | null, theme?: Theme): Palette {
   const base = (key === "custom" && custom) || PALETTES.find((p) => p.key === key) || PALETTES[0];
-  if (!theme || (!theme.dark && theme.contrast === "standard")) return base;
+  if (!theme || (!theme.dark && theme.contrast === "standard")) {
+    /* Saved custom schemes may predate the secondary role. */
+    return base.secondary ? base : { ...base, secondary: schemeFromSeed(base.seed ?? base.primary).secondary };
+  }
   const seed = base.seed ?? base.primary;
   /* a preset's hue and chroma are deliberate (Mono is nearly grey), so they are kept as they are */
   return { ...schemeFromSeed(seed, base.label, { dark: theme.dark, contrast: theme.contrast, keepChroma: base.key !== "custom" }), key: base.key };
@@ -984,7 +1011,7 @@ export const KIND_SPEC: Record<Kind, KindSpec> = {
     hasIcon: false,
     hasValue: true,
     hasWavy: true,
-    size: { min: 24, max: 120, step: 4, icon: "open_in_full", presets: [24, 40, 48, 64] },
+    size: { min: 24, max: 120, step: 4, icon: "open_in_full", presets: [24, 40, 48, 52, 64] },
     defLabel: "",
     defIcon: null,
     defSize: 48,
@@ -1158,6 +1185,13 @@ export type Item = {
   /** 0..100 for sliders and determinate progress; undefined = indeterminate */
   value?: number;
   wavy?: boolean;
+  /** Undefined retains the original rail; false/true select the collapsed/expanded expressive rail. */
+  railExpanded?: boolean;
+  /** Expanded rail overlays a scrim rather than taking additional layout space. */
+  railModal?: boolean;
+  [railExpansionSide]?: "left" | "right";
+  /** Progress track thickness in dp (TRACK_MIN..TRACK_MAX); omitted uses the standard 4dp stroke. */
+  trackThickness?: number;
   contained?: boolean;
   /** free text the author writes about what this part does */
   note?: string;
@@ -1498,6 +1532,8 @@ export type Group = {
   y: number;
   axis: Axis;
   items: Item[];
+  /** a finished section the author locked from the Layers panel: it cannot be dragged, deleted or tidied, but stays selectable */
+  locked?: boolean;
   /** a hand-made group: parts keep their own offsets (in `pos`) and move as one layer */
   free?: boolean;
   pos?: Record<string, { x: number; y: number }>;
@@ -1578,7 +1614,10 @@ export function makeItem(kind: Kind): Item {
     it.radiusTop = 0;
     it.radiusBottom = 0;
   }
-  if (kind === "navRail") it.tabs = defaultTabs();
+  if (kind === "navRail") {
+    it.tabs = defaultTabs();
+    it.railExpanded = false;
+  }
   if (kind === "tabs" || kind === "fabMenu" || kind === "select") it.tabs = defaultTabsFor(kind);
   if (kind === "toolbar") it.tabs = defaultTabsFor(kind).slice(0, 4);
   return it;
@@ -1586,6 +1625,19 @@ export function makeItem(kind: Kind): Item {
 
 /** Content-sized kinds are measured in the DOM; the rest derive from spec + size. */
 export const MEASURED: Kind[] = ["button", "extendedFab", "chip", "switch", "checkbox", "text", "splitButton", "radio", "badge"];
+
+/** Progress track thickness range in dp; Material's standard bar is 4 and its thick bar 8. */
+export const TRACK_MIN = 2;
+export const TRACK_MAX = 16;
+export const TRACK_DEFAULT = 4;
+/** A ring can only be so thick before its gap swallows it: a sixth of the diameter, never under 4. */
+export const maxRingThickness = (size: number) => Math.max(TRACK_DEFAULT, Math.min(TRACK_MAX, Math.floor(size / 6)));
+export const isTrackThickness = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= TRACK_MIN && v <= TRACK_MAX;
+/** The thickness actually drawn: a ring caps the value by its own diameter. */
+export const progressThickness = (it: Item): number => {
+  const v = isTrackThickness(it.trackThickness) ? it.trackThickness : TRACK_DEFAULT;
+  return it.kind === "circularProgress" ? Math.min(v, maxRingThickness(it.size ?? KIND_SPEC.circularProgress.w)) : v;
+};
 
 export function sizeOf(it: Item, widths: Record<string, number>) {
   const s = KIND_SPEC[it.kind];
@@ -1638,7 +1690,7 @@ export function sizeOf(it: Item, widths: Record<string, number>) {
     case "box":
       return { w: n, h: it.size2 ?? s.h };
     case "navRail":
-      return { w: s.w, h: it.size2 ?? s.h };
+      return { w: railWidth(it), h: it.size2 ?? s.h };
     default:
       return { w: s.w, h: s.h };
   }
@@ -1661,8 +1713,9 @@ export function baseRadii(it: Item): Radii {
     }
     case "navRail": {
       /* a rail's corners are its left and right sides: radiusTop is the left pair, radiusBottom the right */
-      const l = it.radiusTop ?? 0;
-      const r = it.radiusBottom ?? 0;
+      const modalRadius = it.railExpanded && it.railModal ? 16 : 0;
+      const l = it.radiusTop ?? modalRadius;
+      const r = it.radiusBottom ?? modalRadius;
       return { tl: l, bl: l, tr: r, br: r };
     }
     case "fab":
