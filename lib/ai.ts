@@ -238,7 +238,9 @@ export function popHistory<V extends string, H extends string>(current: string |
 
 /** A whole design from an idea, drafted by the author's own model. `guide` is the same
  *  agent guide a coding agent reads (public/agent.md), so both paths follow one spec.
- *  The answer is the document itself; a link would be pointless here. */
+ *  The answer is the document itself; a link would be pointless here.
+ *  On a provider with a small output budget (DeepSeek caps at 8k), a cut-off reply
+ *  is retried once with a much lighter brief instead of failing. */
 export async function draftDesign(s: AiSettings, guide: string, idea: string, lang: Lang, signal?: AbortSignal): Promise<Doc> {
   const system = [
     "You draft M3E Canvas designs. Follow the guide below exactly.",
@@ -246,8 +248,14 @@ export async function draftDesign(s: AiSettings, guide: string, idea: string, la
     "",
     guide,
   ].join("\n");
-  const user = [`Sketch this app: ${idea.trim()}`, `Write every label, title and note in ${LANG_NAME[lang]}.`, "Three screens at most. Keep every screen light."].join("\n");
-  const j = parseJsonObject(await complete(s, system, user, signal, 64000));
+  const ask = (brief: string) => [`Sketch this app: ${idea.trim()}`, `Write every label, title and note in ${LANG_NAME[lang]}.`, brief].join("\n");
+  let j: Record<string, unknown>;
+  try {
+    j = parseJsonObject(await complete(s, system, ask("Three screens at most. Keep every screen light."), signal, 64000));
+  } catch (e) {
+    if ((e as Error).message !== "long") throw e;
+    j = parseJsonObject(await complete(s, system, ask("Two screens at most, about eight parts per screen, short labels, no notes. The reply itself must stay small."), signal, 64000));
+  }
   if (!isProject(j)) throw new Error("json");
   return j;
 }
