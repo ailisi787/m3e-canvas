@@ -32,21 +32,33 @@ import {
   contentWidth,
   defaultTabsFor,
   framePresetOf,
+  CardAlign,
+  cardContentAlignOf,
+  cardDefaultFillOf,
   cardFillOf,
+  cardImageMaxOf,
+  cardImagePosOf,
+  cardImageSizeOf,
+  cardLayoutOf,
+  cardLayoutPatch,
+  cardTextColorOf,
+  CARD_IMAGE_MIN,
   frameSizeOf,
   halfWidth,
   isPhoneFrame,
   isWideRail,
+  onToken,
   toggleIcon,
   iconSlotsOf,
   setIconSlot,
   variantStyle,
+  scaleR,
   Place,
   AlignKind,
 } from "@/lib/tokens";
 import { IconPicker } from "./IconPicker";
 import { Icon } from "./M3Node";
-import { ButtonRun, CornerIcon, Field, IconBtn, Section, Segmented, SizePresets, Slider, TidyButton, TidyState, Toggle, TokenChips } from "./ui";
+import { ButtonRun, CardLayoutPicker, CornerIcon, Field, IconBtn, Section, Segmented, SizePresets, Slider, TextTokenChips, TidyButton, TidyState, Toggle, TokenChips } from "./ui";
 import { AiWriteBtn } from "./AiPanel";
 import { popHistory } from "@/lib/ai";
 import { KIND_TEXT, SWIPE_TEXT, TRANSITION_TEXT, UIKey, t, useLang } from "@/lib/i18n";
@@ -897,13 +909,38 @@ export function Inspector({
               </div>
             )}
             {spec.hasSupporting && !editOn && (
+              /* a card's body is a paragraph: the field wraps and grows with it, and the canvas wraps the text itself */
               <Field
                 value={item.supporting ?? ""}
                 onChange={(supporting) => onChange({ supporting })}
                 placeholder={item.kind === "snackbar" ? t("action", lang) : t("supporting", lang)}
                 p={p}
                 icon="notes"
+                multiline={item.kind === "card"}
+                rows={1}
+                grow={item.kind === "card"}
               />
+            )}
+            {item.kind === "card" && !editOn && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
+                  <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: p.onSurfaceVariant }}>{t("textPosition", lang)}</span>
+                  <Segmented<CardAlign>
+                    options={[
+                      { key: "start", icon: "vertical_align_top", title: t("textTop", lang) },
+                      { key: "center", icon: "vertical_align_center", title: t("textMiddle", lang) },
+                      { key: "end", icon: "vertical_align_bottom", title: t("textBottom", lang) },
+                    ]}
+                    value={cardContentAlignOf(item)}
+                    onChange={(contentAlign) => onChange({ contentAlign })}
+                    p={p}
+                    height={32}
+                    grow={false}
+                  />
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: p.onSurfaceVariant }}>{t("textColor", lang)}</div>
+                <TextTokenChips value={item.textColor} auto={cardTextColorOf(item, p)} onChange={(textColor) => onChange({ textColor })} p={p} />
+              </>
             )}
           </div>
         </Section>
@@ -988,8 +1025,21 @@ export function Inspector({
       {(item.kind === "image" || item.kind === "card") && !editOn && (
         <Section id="image" icon="image" title={t("image", lang)} p={p}>
           {item.kind === "card" && (
-            <div style={{ marginBottom: 10 }}>
-              <Toggle on={!item.noImage} onChange={(on) => onChange({ noImage: on ? undefined : true })} p={p} icon="image" label={t("imageArea", lang)} grow />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+              <CardLayoutPicker value={cardLayoutOf(item)} onChange={(layout) => onChange(cardLayoutPatch(layout))} p={p} />
+              {!item.noImage && cardImagePosOf(item) !== "background" && cardImageMaxOf(item) > CARD_IMAGE_MIN && (
+                /* the image area's one free dimension: its height on top, its width at a side; a card too small to leave room hides it */
+                <Slider
+                  icon={cardImagePosOf(item) === "top" ? "height" : "width"}
+                  title={t(cardImagePosOf(item) === "top" ? "height" : "width", lang)}
+                  value={cardImageSizeOf(item)}
+                  min={CARD_IMAGE_MIN}
+                  max={cardImageMaxOf(item)}
+                  step={4}
+                  onChange={(imageSize) => onChange({ imageSize })}
+                  p={p}
+                />
+              )}
             </div>
           )}
           <input
@@ -1006,6 +1056,7 @@ export function Inspector({
               } catch {}
             }}
           />
+          {(!item.noImage || item.src) && (<>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <button
               onClick={() => fileRef.current?.click()}
@@ -1037,6 +1088,7 @@ export function Inspector({
           <div style={{ marginTop: 8 }}>
             <UrlField key={item.id} value={item.src && /^https?:\/\//.test(item.src) ? item.src : ""} onChange={(src) => onChange({ src })} placeholder={t("imageUrl", lang)} p={p} />
           </div>
+          </>)}
         </Section>
       )}
 
@@ -1090,7 +1142,7 @@ export function Inspector({
         </div>
       )}
 
-      {variants.length > 0 && (
+      {variants.length > 0 && item.kind !== "card" && (
         <Section id="style" icon="palette" title={t("style", lang)} p={p}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {variants.map((v) => (
@@ -1116,6 +1168,10 @@ export function Inspector({
             none={item.kind === "card"}
             noneOn={item.kind === "card" && !item.fill}
             onNone={() => onChange({ fill: undefined })}
+            noneColor={item.kind === "card" ? p[cardDefaultFillOf(item.variant)] : undefined}
+            noneTextColor={item.kind === "card" ? onToken(cardDefaultFillOf(item.variant), p) : undefined}
+            noneIcon={item.kind === "card" ? "restart_alt" : undefined}
+            noneLabel={item.kind === "card" ? t("defaultColor", lang) : undefined}
           />
           {item.kind === "listItem" && (
             <>
@@ -1333,7 +1389,7 @@ export function Inspector({
                 )}
               </>
             )}
-            {hasRadius && (item.kind === "card" || item.kind === "image") && (
+            {hasRadius && item.kind === "image" && (
               <Slider
                 icon="rounded_corner"
                 title={t("cornerRadius", lang)}
@@ -1345,40 +1401,60 @@ export function Inspector({
                 p={p}
               />
             )}
-            {hasRadius && item.kind === "box" && (
-              <Toggle
-                on={!!item.corners}
-                onChange={(each) =>
-                  onChange(
-                    each
-                      ? { corners: { tl: item.radiusTop ?? 0, tr: item.radiusTop ?? 0, bl: item.radiusBottom ?? 0, br: item.radiusBottom ?? 0 } }
-                      : { corners: undefined, radiusTop: item.corners?.tl ?? item.radiusTop, radiusBottom: item.corners?.bl ?? item.radiusBottom },
-                  )
-                }
-                p={p}
-                icon="crop_free"
-                label={t("cornersEach", lang)}
-                grow
-              />
-            )}
-            {hasRadius && item.kind === "box" && item.corners && (
-              <>
-                {(["tl", "tr", "bl", "br"] as const).map((k) => (
-                  <Slider
-                    key={k}
-                    iconNode={<CornerIcon side={k} />}
-                    title={t(k === "tl" ? "cornerTl" : k === "tr" ? "cornerTr" : k === "bl" ? "cornerBl" : "cornerBr", lang)}
-                    value={item.corners![k]}
-                    min={0}
-                    max={40}
-                    step={1}
-                    onChange={(v) => onChange({ corners: { ...item.corners!, [k]: v } })}
+            {hasRadius && (item.kind === "card" || item.kind === "box") && (() => {
+              /* One radius for every corner until the author asks for each. The seeds match what the
+               * canvas draws: a box's unset side is 0, a card's unset radius is the scaled kind default.
+               * A box saved with different top and bottom radii opens straight in per-corner mode. */
+              const isBox = item.kind === "box";
+              const top = item.radiusTop ?? (isBox ? 0 : scaleR(spec.radius));
+              const bottom = isBox ? (item.radiusBottom ?? 0) : top;
+              const corners = item.corners ?? (isBox && top !== bottom ? { tl: top, tr: top, bl: bottom, br: bottom } : undefined);
+              return (
+                <>
+                  {!corners && (
+                    <Slider
+                      icon="rounded_corner"
+                      title={t("cornerRadius", lang)}
+                      value={top}
+                      min={0}
+                      max={48}
+                      step={1}
+                      onChange={(r) => onChange(isBox ? { radiusTop: r, radiusBottom: r } : { radiusTop: r })}
+                      p={p}
+                    />
+                  )}
+                  <Toggle
+                    on={!!corners}
+                    onChange={(each) =>
+                      onChange(
+                        each
+                          ? { corners: { tl: top, tr: top, bl: bottom, br: bottom } }
+                          : { corners: undefined, radiusTop: corners?.tl ?? top, radiusBottom: isBox ? (corners?.tl ?? top) : undefined },
+                      )
+                    }
                     p={p}
+                    icon="crop_free"
+                    label={t("cornersEach", lang)}
+                    grow
                   />
-                ))}
-              </>
-            )}
-            {hasRadius && (item.kind === "bottomNav" || item.kind === "navRail" || item.kind === "topAppBar" || (item.kind === "box" && !item.corners)) && (
+                  {corners &&
+                    (["tl", "tr", "bl", "br"] as const).map((k) => (
+                      <Slider
+                        key={k}
+                        iconNode={<CornerIcon side={k} />}
+                        title={t(k === "tl" ? "cornerTl" : k === "tr" ? "cornerTr" : k === "bl" ? "cornerBl" : "cornerBr", lang)}
+                        value={corners[k]}
+                        min={0}
+                        max={48}
+                        step={1}
+                        onChange={(v) => onChange({ corners: { ...corners, [k]: v } })}
+                        p={p}
+                      />
+                    ))}
+                </>
+              );
+            })()}
+            {hasRadius && (item.kind === "bottomNav" || item.kind === "navRail" || item.kind === "topAppBar") && (
               <>
                 {/* a rail's two sliders are its left and right sides; the fields are shared with the bars */}
                 <Slider

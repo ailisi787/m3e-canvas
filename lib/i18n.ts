@@ -60,6 +60,12 @@ export function translateDefaultFrameName(name: string, lang: Lang): string {
   return name;
 }
 
+export const TEXT_TOKEN_TEXT = {
+  ja: { onSurface: "標準（オンサーフェス）", onSurfaceVariant: "控えめ（オンサーフェスバリアント）", primary: "プライマリ", secondary: "セカンダリ", onPrimaryContainer: "オンプライマリコンテナ", onSecondaryContainer: "オンセカンダリコンテナ", onTertiaryContainer: "オンターシャリコンテナ", inverseOnSurface: "反転オンサーフェス" },
+  zh: { onSurface: "表面文字", onSurfaceVariant: "表面次要文字", primary: "主色", secondary: "次色", onPrimaryContainer: "主色容器文字", onSecondaryContainer: "次色容器文字", onTertiaryContainer: "第三色容器文字", inverseOnSurface: "反色表面文字" },
+  ko: { onSurface: "표면 텍스트", onSurfaceVariant: "표면 보조 텍스트", primary: "주 색상", secondary: "보조 색상", onPrimaryContainer: "주 색상 컨테이너 텍스트", onSecondaryContainer: "보조 색상 컨테이너 텍스트", onTertiaryContainer: "세 번째 색상 컨테이너 텍스트", inverseOnSurface: "반전 표면 텍스트" },
+};
+
 export const COLOR_TOKEN_TEXT = {
   ja: { surface: "サーフェス", surfaceContainerLow: "コンテナ（低）", surfaceContainer: "コンテナ", surfaceContainerHigh: "コンテナ（高）", surfaceContainerHighest: "コンテナ（最高）", primaryContainer: "プライマリコンテナ", secondaryContainer: "セカンダリコンテナ", tertiaryContainer: "ターシャリコンテナ", primary: "プライマリ", inverseSurface: "反転サーフェス" },
   zh: { surface: "表面", surfaceContainerLow: "低层容器", surfaceContainer: "容器", surfaceContainerHigh: "高层容器", surfaceContainerHighest: "最高层容器", primaryContainer: "主色容器", secondaryContainer: "次色容器", tertiaryContainer: "第三色容器", primary: "主色", inverseSurface: "反色表面" },
@@ -104,6 +110,7 @@ export const UI = {
   screenName: { ja: "画面の名前", en: "Screen name", zh: "屏幕名称" },
   name: { ja: "名前", en: "Name", zh: "名称" },
   background: { ja: "背景", en: "Background", zh: "背景" },
+  defaultColor: { ja: "既定の色", en: "Default color", zh: "默认颜色" },
   export: { ja: "書き出し", en: "Export", zh: "导出" },
   project: { ja: "プロジェクト", en: "Project", zh: "项目" },
   saveProject: { ja: "プロジェクトを保存", en: "Save project", zh: "保存项目" },
@@ -177,7 +184,17 @@ export const UI = {
   pickImage: { ja: "画像を選ぶ", en: "Choose image", zh: "选择图片" },
   removeImage: { ja: "画像を外す", en: "Remove image", zh: "移除图片" },
   imageUrl: { ja: "画像の URL", en: "Image URL", zh: "图片网址" },
-  imageArea: { ja: "画像エリア", en: "Image area", zh: "图片区域" },
+  imageTop: { ja: "上部", en: "Top", zh: "顶部" },
+  imageLeading: { ja: "先頭", en: "Leading", zh: "左侧" },
+  imageTrailing: { ja: "末尾", en: "Trailing", zh: "右侧" },
+  cardLayout: { ja: "レイアウト", en: "Layout", zh: "布局" },
+  noImageLayout: { ja: "画像なし", en: "No image", zh: "无图片" },
+  textPosition: { ja: "文字の位置", en: "Text position", zh: "文字位置" },
+  textTop: { ja: "上", en: "Top", zh: "顶部" },
+  textMiddle: { ja: "中央", en: "Middle", zh: "居中" },
+  textBottom: { ja: "下", en: "Bottom", zh: "底部" },
+  textColor: { ja: "文字の色", en: "Text color", zh: "文字颜色" },
+  autoColor: { ja: "自動", en: "Auto", zh: "自动" },
   autoWidth: { ja: "文字の幅", en: "Text width", zh: "跟随文本宽度" },
   icon: { ja: "アイコン", en: "Icon", zh: "图标" },
   noIcon: { ja: "アイコンなし", en: "No icon", zh: "无图标" },
@@ -420,7 +437,7 @@ export const KO: Record<UIKey, string> = {
   select: "선택 (V)", hand: "손 도구 (H / Space)", blank: "빈 캔버스", phone: "휴대전화 화면", addFrame: "화면 추가", preview: "미리보기 (P)",
   zoomIn: "확대 (+)", zoomOut: "축소 (-)", fit: "전체 맞춤 (0)", undo: "실행 취소 (Ctrl+Z)", redo: "다시 실행 (Ctrl+Shift+Z)",
   clearAll: "모두 지우기", clearAllTitle: "캔버스를 비울까요?", clearAllBody: "모든 화면과 부품을 삭제합니다. 실행 취소(Ctrl+Z)로 복원할 수 있습니다.",
-  screen: "화면", screenName: "화면 이름", name: "이름", background: "배경", export: "내보내기", project: "프로젝트",
+  screen: "화면", screenName: "화면 이름", name: "이름", background: "배경", defaultColor: "기본 색상", export: "내보내기", project: "프로젝트",
   saveProject: "프로젝트 저장", openProject: "프로젝트 열기", replaceProjectTitle: "이 프로젝트를 열까요?",
   replaceProject: "현재 캔버스가 교체됩니다. 실행 취소(Ctrl+Z)로 되돌릴 수 있습니다.",
   askAi: "AI에게 맡기기",
@@ -438,7 +455,7 @@ export const KO: Record<UIKey, string> = {
   copied: "복사됨", saveImage: "이미지로 저장", saving: "저장 중…", previewFrom: "이 화면부터 미리보기",
   duplicate: "복제", duplicateKey: "복제 (Ctrl+D)", delete: "삭제 (Delete)", deleteSelection: "선택 항목 삭제",
   text: "텍스트", label: "레이블", bold: "굵게", action: "동작", supporting: "보조 텍스트", tabs: "항목", changeIcon: "아이콘 변경",
-  options: "옵션", addOption: "옵션 추가", removeOption: "이 옵션 삭제", selectedOption: "초깃값으로 설정(다시 누르면 선택 해제)", image: "이미지", pickImage: "이미지 선택", removeImage: "이미지 제거", imageUrl: "이미지 URL", imageArea: "이미지 영역", autoWidth: "글자 너비", icon: "아이콘", noIcon: "아이콘 없음", searchIcons: "아이콘 검색",
+  options: "옵션", addOption: "옵션 추가", removeOption: "이 옵션 삭제", selectedOption: "초깃값으로 설정(다시 누르면 선택 해제)", image: "이미지", pickImage: "이미지 선택", removeImage: "이미지 제거", imageUrl: "이미지 URL", imageTop: "위쪽", imageLeading: "앞쪽", imageTrailing: "뒤쪽", cardLayout: "레이아웃", noImageLayout: "이미지 없음", textPosition: "텍스트 위치", textTop: "위", textMiddle: "가운데", textBottom: "아래", textColor: "텍스트 색상", autoColor: "자동", autoWidth: "글자 너비", icon: "아이콘", noIcon: "아이콘 없음", searchIcons: "아이콘 검색",
   style: "스타일", state: "상태", selected: "선택됨", handle: "핸들(하단 시트)", listSwitch: "끝에 스위치", on: "켜짐", container: "컨테이너", wavy: "물결 모양", determinate: "확정형",
   railState: "레일 표시", railCollapsed: "접힘", railExpanded: "펼침",
   railLegacy: "기존 레일 · 너비 80dp", railUpgrade: "Expressive로 전환 (96dp)",

@@ -82,6 +82,16 @@ describe("isProject", () => {
     expect(isProject(withItem({ tabs: [] }))).toBe(true);
   });
 
+  it("accepts card layout customization fields", () => {
+    expect(isProject(withItem({
+      kind: "card",
+      imagePos: "trailing",
+      imageSize: 96,
+      contentAlign: "center",
+      textColor: "primary",
+    }))).toBe(true);
+  });
+
   it.each([
     { id: undefined }, { id: 1 }, { kind: "unknown" }, { kind: null }, { label: 1 },
     { icon: undefined }, { icon: 1 }, { variant: "unknown" }, { variant: undefined },
@@ -90,6 +100,7 @@ describe("isProject", () => {
     { corners: { tl: "0", tr: 0, bl: 0, br: 0 } }, { corners: { tl: 0, tr: 0, bl: 0, br: Infinity } },
     { tabs: null }, { tabs: {} }, { tabs: [null] }, { tabs: [{ icon: "home" }] },
     { tabs: [{ label: 1 }] }, { tabs: [{ label: "Home", icon: 1 }] },
+    { imagePos: "bottom" }, { imageSize: 0 }, { imageSize: NaN }, { contentAlign: "top" }, { textColor: "pink" },
   ])("rejects invalid item fields %# %o", (patch) => {
     expect(isProject(withItem(patch))).toBe(false);
   });

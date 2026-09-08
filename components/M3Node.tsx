@@ -13,7 +13,16 @@ import {
   Radii,
   STATUS_BAR_H,
   baseRadii,
+  CARD_MEDIA_GAP,
+  CARD_PADDING,
+  CARD_TEXT_GAP,
+  cardContentAlignOf,
   cardFillOf,
+  cardImagePosOf,
+  cardImageSizeOf,
+  cardBodyColorOf,
+  cardScrimOf,
+  cardTextColorOf,
   onToken,
   scaleR,
   sizeOf,
@@ -476,47 +485,77 @@ function Body({ item, p }: { item: Item; p: Palette }) {
       );
 
     case "card": {
-      const cw = item.size ?? 320;
-      return (
+      const pos = cardImagePosOf(item);
+      const hasImage = !item.noImage;
+      const padding = CARD_PADDING;
+      const align = cardContentAlignOf(item);
+      const justifyContent = { start: "flex-start", center: "center", end: "flex-end" }[align] as React.CSSProperties["justifyContent"];
+      const ink = cardTextColorOf(item, p);
+      const body = cardBodyColorOf(item, p);
+      const picture = item.src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={item.src} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      ) : (
+        item.icon && <Icon name={item.icon} size={34} />
+      );
+      const media = (style: React.CSSProperties) => (
         <div
           style={{
-            padding: 12,
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            boxSizing: "border-box",
+            borderRadius: scaleR(14),
+            background: p.primaryContainer,
+            color: p.onPrimaryContainer,
+            display: "grid",
+            placeItems: "center",
+            flex: "0 0 auto",
+            overflow: "hidden",
+            ...style,
           }}
         >
-          {!item.noImage && (
-            <div
-              style={{
-                height: Math.round(cw * 0.28),
-                borderRadius: scaleR(14),
-                background: p.primaryContainer,
-                color: p.onPrimaryContainer,
-                display: "grid",
-                placeItems: "center",
-                flex: "0 0 auto",
-                overflow: "hidden",
-              }}
-            >
-              {item.src ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={item.src} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-              ) : (
-                item.icon && <Icon name={item.icon} size={34} />
-              )}
-            </div>
-          )}
+          {picture}
+        </div>
+      );
+      const text = (
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: CARD_TEXT_GAP, justifyContent }}>
           {hasLabel && (
-            <div style={{ fontSize: 16, fontWeight: w(600, 700), color: item.fill ? onToken(item.fill, p) : p.onSurface, ...ellipsis }}>{item.label}</div>
+            <div style={{ fontSize: 16, fontWeight: w(600, 700), color: ink, ...ellipsis }}>{item.label}</div>
           )}
           {hasSupporting && (
-            <div style={{ fontSize: 13, lineHeight: 1.5, color: item.fill ? onToken(item.fill, p) : p.onSurfaceVariant, opacity: item.fill ? 0.8 : 1, overflow: "hidden" }}>
+            <div style={{ fontSize: 13, lineHeight: 1.5, color: body.color, opacity: body.opacity, overflow: "hidden" }}>
               {item.supporting}
             </div>
           )}
+        </div>
+      );
+      if (hasImage && pos === "background") {
+        /* Full-bleed media behind the text. A photo, or a chosen text color that the placeholder's
+         * container may not carry, gets a scrim on the text's side: dark under light text, light under dark. */
+        const scrim = item.src || item.textColor ? cardScrimOf(ink, align) : undefined;
+        return (
+          <div style={{ position: "relative", height: "100%", boxSizing: "border-box" }}>
+            <div style={{ position: "absolute", inset: 0, background: p.primaryContainer, color: p.onPrimaryContainer, display: "grid", placeItems: "center" }}>
+              {picture}
+            </div>
+            {scrim && <div style={{ position: "absolute", inset: 0, background: scrim }} />}
+            <div style={{ position: "relative", height: "100%", boxSizing: "border-box", padding, display: "flex", flexDirection: "column" }}>{text}</div>
+          </div>
+        );
+      }
+      /* top: the image band above the text; leading / trailing: a full-height column beside it */
+      const side = hasImage && (pos === "leading" || pos === "trailing");
+      return (
+        <div
+          style={{
+            padding,
+            height: "100%",
+            display: "flex",
+            flexDirection: side ? "row" : "column",
+            gap: CARD_MEDIA_GAP,
+            boxSizing: "border-box",
+          }}
+        >
+          {hasImage && pos !== "trailing" && media(side ? { width: cardImageSizeOf(item), alignSelf: "stretch" } : { height: cardImageSizeOf(item) })}
+          {text}
+          {hasImage && pos === "trailing" && media({ width: cardImageSizeOf(item), alignSelf: "stretch" })}
         </div>
       );
     }
