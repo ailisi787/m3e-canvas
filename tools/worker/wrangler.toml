@@ -1,0 +1,3 @@
+name = "m3e-ai-proxy"
+main = "src/worker.js"
+compatibility_date = "2026-09-01"
