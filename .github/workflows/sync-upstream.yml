@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: sync-upstream
@@ -22,12 +23,28 @@ jobs:
           fetch-depth: 0
 
       - name: Merge upstream main
+        id: merge
         run: |
           git remote add upstream https://github.com/lnkiai/m3e-canvas.git
           git fetch upstream main
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git merge --no-edit upstream/main
+          echo "changed=$(git rev-list --count ORIG_HEAD..HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Push
         run: git push origin main
+
+      # a push made with the default GITHUB_TOKEN does not trigger other
+      # workflows, so the site deploy has to be started explicitly
+      - name: Trigger deploy
+        if: steps.merge.outputs.changed != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run "Deploy to GitHub Pages" --ref main
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "上游自动同步失败" --body "定时同步工作流运行失败，多半是上游改动和本地改动冲突了，需要手动解决。详情见本次 Actions 运行日志。" || true
